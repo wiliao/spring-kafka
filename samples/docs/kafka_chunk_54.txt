@@ -1,0 +1,200 @@
+sasl.kerberos.service.name=kafka
+Clients should be configured with their own keytab and principal in the JAAS config‐
+uration and sasl.kerberos.service.name to indicate the name of the service they
+are connecting to:
+sasl.mechanism=GSSAPI
+sasl.kerberos.service.name=kafka 
+sasl.jaas.config=com.sun.security.auth.module.Krb5LoginModule required \
+    useKeyTab=true storeKey=true   \
+    keyTab="/path/to/alice.keytab" \
+    principal="Alice@EXAMPLE.COM"; 
+The service name for the Kafka service should be specified for clients.
+Clients may use principals without hostname.
+The short name of the principal is used as the client identity by default. For example,
+User:Alice is the client principal and User:kafka is the broker principal in the
+example. The broker configuration sasl.kerberos.principal.to.local.rules can
+be used to apply a list of rules to transform the fully qualified principal to a custom
+principal.
+Security considerations.    Use of SASL_SSL is recommended in production deployments
+using Kerberos to protect the authentication flow as well as data traffic on the con‐
+nection after authentication. If TLS is not used to provide a secure transport layer,
+eavesdroppers on the network may gain enough information to mount a dictionary
+attack or brute-force attack to steal client credentials. It is safer to use randomly gen‐
+erated keys for brokers instead of keys generated from passwords that are easier to
+crack. Weak encryption algorithms like DES-MD5 should be avoided in favor of
+Authentication | 277
+
+=== PAGE 307 ===
+stronger algorithms. Access to keytab files must be restricted using filesystem permis‐
+sions since any user in possession of the file may impersonate the user.
+SASL/GSSAPI requires a secure DNS service for server authentication. Because
+denial-of-service attacks against the KDC or DNS service can result in authentication
+failures in clients, it is necessary to monitor the availability of these services. Kerberos
+also relies on loosely synchronized clocks with configurable variability to detect
+replay attacks. It is important to ensure that clock synchronization is secure.
+SASL/PLAIN
+RFC-4616 defines a simple username/password authentication mechanism that can
+be used with TLS to provide secure authentication. During authentication, the client
+sends a username and password to the server, and the server verifies the password
+using its password store. Kafka has built-in SASL/PLAIN support that can be integra‐
+ted with a secure external password database using a custom callback handler.
+Configuring SASL/PLAIN.    The default implementation of SASL/PLAIN uses the broker’s
+JAAS configuration as the password store. All client usernames and passwords are
+included as login options, and the broker verifies that the password provided by a cli‐
+ent during authentication matches one of these entries. A broker username and pass‐
+word are required only if SASL/PLAIN is used for inter-broker communication:
+sasl.enabled.mechanisms=PLAIN
+sasl.mechanism.inter.broker.protocol=PLAIN
+listener.name.external.plain.sasl.jaas.config=\
+  org.apache.kafka.common.security.plain.PlainLoginModule required \
+    username="kafka" password="kafka-password" \ 
+    user_kafka="kafka-password" \
+    user_Alice="Alice-password"; 
+The username and password used for inter-broker connections initiated by the
+broker.
+When Alice’s client connects to the broker, the password provided by Alice is
+validated against this password in the broker’s config.
+Clients must be configured with username and password for authentication:
+sasl.mechanism=PLAIN
+sasl.jaas.config=org.apache.kafka.common.security.plain.PlainLoginModule \
+    required username="Alice" password="Alice-password";
+The built-in implementation that stores all passwords in every broker’s JAAS configu‐
+ration is insecure and not very flexible since all brokers will need to be restarted to
+add or remove a user. When using SASL/PLAIN in production, a custom server call‐
+back handler can be used to integrate brokers with a secure third-party password
+server. Custom callback handlers can also be used to support password rotation. On
+278 | Chapter 11: Securing Kafka
+
+=== PAGE 308 ===
+the server side, a server callback handler should support both old and new passwords
+for an overlapping period until all clients switch to the new password. The following
+example shows a callback handler that verifies encrypted passwords from files gener‐
+ated using the Apache tool htpasswd:
+public class PasswordVerifier extends PlainServerCallbackHandler {
+  private final List<String> passwdFiles = new ArrayList<>(); 
+  @Override
+  public void configure(Map<String, ?> configs, String mechanism,
+                        List<AppConfigurationEntry> jaasEntries) {
+    Map<String,?> loginOptions = jaasEntries.get(0).getOptions();
+    String files = (String) loginOptions.get("password.files"); 
+    Collections.addAll(passwdFiles, files.split(","));
+  }
+  @Override
+  protected boolean authenticate(String user, char[] password) {
+    return passwdFiles.stream()                               
+        .anyMatch(file -> authenticate(file, user, password));
+  }
+  private boolean authenticate(String file, String user, char[] password) {
+    try {
+      String cmd = String.format("htpasswd -vb %s %s %s",     
+              file, user, new String(password));
+      return Runtime.getRuntime().exec(cmd).waitFor() == 0;
+    } catch (Exception e) {
+      return false;
+    }
+  }
+}
+We use multiple password files so that we can support password rotation.
+We pass pathnames of password files as a JAAS option in the broker configura‐
+tion. Custom broker configuration options may also be used.
+We check if the password matches in any of the files, allowing both old and new
+passwords to be used for a period of time.
+We use htpasswd for simplicity. A secure database can be used for production
+deployments.
+Brokers are configured with the password validation callback handler and its options:
+listener.name.external.plain.sasl.jaas.config=\
+    org.apache.kafka.common.security.plain.PlainLoginModule required \
+    password.files="/path/to/htpassword.props,/path/to/oldhtpassword.props";
+Authentication | 279
+
+=== PAGE 309 ===
+listener.name.external.plain.sasl.server.callback.handler.class=\
+    com.example.PasswordVerifier
+On the client side, a client callback handler that implements org.apache.kafka.
+common.security.auth.AuthenticateCallbackHandler can be used to load pass‐
+words dynamically at runtime when a connection is established instead of loading
+statically from the JAAS configuration during startup. Passwords may be loaded from
+encrypted files or using an external secure server to improve security. The following
+example loads passwords dynamically from a file using configuration classes in
+Kafka:
+  @Override
+  public void handle(Callback[] callbacks) throws IOException {
+    Properties props = Utils.loadProps(passwdFile);           
+    PasswordConfig config = new PasswordConfig(props);
+    String user = config.getString("username");
+    String password = config.getPassword("password").value(); 
+    for (Callback callback: callbacks) {
+      if (callback instanceof NameCallback)
+        ((NameCallback) callback).setName(user);
+      else if (callback instanceof PasswordCallback) {
+        ((PasswordCallback) callback).setPassword(password.toCharArray());
+      }
+    }
+  }
+  private static class PasswordConfig extends AbstractConfig {
+    static ConfigDef CONFIG = new ConfigDef()
+      .define("username", STRING, HIGH, "User name")
+      .define("password", PASSWORD, HIGH, "User password"); 
+    PasswordConfig(Properties props) {
+      super(CONFIG, props, false);
+    }
+  }
+We load the config file within the callback to ensure we use the latest password to
+support password rotation.
+The underlying configuration library returns the actual password value even if
+the password is externalized.
+We define password configs with the PASSWORD type to ensure that passwords are
+not included in log entries.
+Clients as well as brokers that use SASL/PLAIN for inter-broker communication can
+be configured with the client-side callback:
+sasl.jaas.config=org.apache.kafka.common.security.plain.PlainLoginModule \
+  required file="/path/to/credentials.props";
+sasl.client.callback.handler.class=com.example.PasswordProvider
+280 | Chapter 11: Securing Kafka
+
+=== PAGE 310 ===
+Security considerations.    Since SASL/PLAIN transmits clear-text passwords over the
+wire, the PLAIN mechanism should be enabled only with encryption using
+SASL_SSL to provide a secure transport layer. Passwords stored in clear text in the
+JAAS configuration of brokers and clients are not secure, so consider encrypting or
+externalizing these passwords in a secure password store. Instead of using the built-in
+password store that stores all client passwords in the broker JAAS configuration, use
+a secure external password server that stores passwords securely and enforces strong
+password policies.
+Clear-Text Passwords
+Avoid clear-text passwords in configuration files even if the files
+can be protected using filesystem permissions. Consider externaliz‐
+ing or encrypting passwords to ensure that passwords are not inad‐
+vertently exposed. Kafka’s password protection feature is described
+later in this chapter.
+SASL/SCRAM
+RFC-5802 introduces a secure username/password authentication mechanism that
+addresses the security concerns with password authentication mechanisms like SASL/
+PLAIN, which send passwords over the wire. The Salted Challenge Response Authen‐
+tication Mechanism (SCRAM) avoids transmitting clear-text passwords and stores
+passwords in a format that makes it impractical to impersonate clients. Salting com‐
+bines passwords with some random data before applying a one-way cryptographic
+hash function to store passwords securely. Kafka has a built-in SCRAM provider that
+can be used in deployments with secure ZooKeeper without the need for additional
+password servers. The SCRAM mechanisms SCRAM-SHA-256 and SCRAM-SHA-512 are
+supported by the Kafka provider.
+Configuring SASL/SCRAM.    An initial set of users can be created after starting Zoo‐
+Keeper prior to starting brokers. Brokers load SCRAM user metadata into an in-
+memory cache during startup, ensuring that all users, including the broker user for
+inter-broker communication, can authenticate successfully. Users can be added or
+deleted at any time. Brokers keep the cache up-to-date using notifications based on a
+ZooKeeper watcher. In this example, we create a user with the principal User:Alice
+and password Alice-password for SASL mechanism SCRAM-SHA-512:
+$ bin/kafka-configs.sh --zookeeper localhost:2181 --alter --add-config \
+  'SCRAM-SHA-512=[iterations=8192,password=Alice-password]'            \
+  --entity-type users --entity-name Alice
+One or more SCRAM mechanisms can be enabled on a listener by configuring the
+mechanisms on the broker. A username and password are required for brokers only if
+the listener is used for inter-broker communication:
+Authentication | 281
+
+=== PAGE 311 ===
+sasl.enabled.mechanisms=SCRAM-SHA-512
+sasl.mechanism.inter.broker.protocol=SCRAM-SHA-512
+listener.name.external.scram-sha-512.sasl.jaas.config=\
+  org.apache.kafka.common.security.scram.ScramLoginModule required \

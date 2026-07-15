@@ -1,0 +1,200 @@
+=== PAGE 1 ===
+Second 
+ 
+Edition
+Gwen Shapira, Todd Palino,  
+Rajini Sivaram & Krit Petty
+  KafkaKafka    
+  The Definitive Guide  The Definitive Guide
+Real-Time Data and Stream Processing at Scale
+Compliments of
+
+=== PAGE 2 ===
+DATA | DATABASES
+“A must-have for 
+developers and 
+operators alike. You 
+need this book if you’re 
+using or running Kafka.”
+—Chris Riccomini
+ Software Engineer, Startup Advisor, and 
+Coauthor of The Missing README
+Kafka: The Definitive Guide
+ISBN: 978-1-492-04308-9
+US $69 .99  CAN $92.99
+Twitter: @oreillymedia
+facebook.com/oreilly
+Every enterprise application creates data, whether it consists 
+of log messages, metrics, user activity, or outgoing messages. 
+Moving all this data is just as important as the data itself. With 
+this updated edition, application architects, developers, and 
+production engineers new to the Kafka streaming platform 
+will learn how to handle data in motion. Additional chapters 
+cover Kafka’s AdminClient API, transactions, new security 
+features, and tooling changes.
+Engineers from Confluent and LinkedIn responsible for 
+developing Kafka explain how to deploy production Kafka 
+clusters, write reliable event-driven microservices, and build 
+scalable stream processing applications with this platform. 
+Through detailed examples, you’ll learn Kafka’s design 
+principles, reliability guarantees, key APIs, and architecture 
+details, including the replication protocol, the controller, and 
+the storage layer.
+You’ll examine:
+• Best practices for deploying and configuring Kafka
+• Kafka producers and consumers for writing and reading 
+messages
+• Patterns and use-case requirements to ensure reliable data 
+delivery
+• Best practices for building data pipelines and applications 
+with Kafka
+• How to perform monitoring, tuning, and maintenance tasks 
+with Kafka in production
+• The most critical metrics among Kafka’s operational 
+measurements
+• Kafka’s delivery capabilities for stream processing systems
+Gwen Shapira  is an engineering leader 
+at Confluent and manages the cloud 
+native Kafka team, which is responsible 
+for Kafka performance, elasticity, and 
+multitenancy. 
+Todd Palino , principal staff engineer 
+in site reliability at LinkedIn, is 
+responsible for capacity and efficiency 
+planning.
+Rajini Sivaram is a principal engineer  
+at Confluent, designing and developing 
+cross-cluster replication and security 
+features for Kafka. 
+Krit Petty  is the site reliability 
+engineering manager for Kafka at 
+LinkedIn.
+
+=== PAGE 4 ===
+Praise for Kafka: The Definitive Guide
+Kafka: The Definitive Guide has everything you need to know to get the most
+from Kafka, whether in the cloud or on-prem. A must-have for developers and
+operators alike. Gwen, Todd, Rajini, and Krit jam years of wisdom into one
+concise book. Y ou need this book if you’re using or running Kafka.
+—Chris Riccomini, software engineer, startup advisor,
+and coauthor of The Missing README
+A comprehensive guide to the fundamentals of Kafka and how to operationalize it.
+—Sumant Tambe, senior software engineer at Linkedin
+This book is an essential read for any Kafka developer or administrator.
+Read it cover to cover to immerse yourself in its details, or keep it on hand for quick
+reference. Either way, its clarity of writing and technical accuracy is superb.
+—Robin Moffatt, staff developer advocate at Confluent
+This is foundational literature for all engineers interested in Kafka. It was critical
+in helping Robinhood navigate the scaling, upgrading, and tuning of Kafka
+to support our rapid user growth.
+—Jaren M. Glover, early engineer at Robinhood, angel investor
+A must-read for everyone who works with Apache Kafka:
+developer or admin, beginner or expert, user or contributor.
+—Matthias J. Sax, software engineer at Confluent
+and Apache Kafka PMC member
+
+=== PAGE 5 ===
+Great guidance for any team seriously using Apache Kafka in production, and engineers
+working on distributed systems in general. This book goes far beyond the usual
+introductory-level coverage and into how Kafka actually works, how it should be used,
+and where the pitfalls lie. For every great Kafka feature, the authors clearly list the caveats
+you’ d only hear about from grizzled Kafka veterans. This information is not easily
+available in one place anywhere else. The clarity and depth of explanations is such that I
+would even recommend it to engineers who do not use Kafka: learning about the
+principles, design choices, and operational gotchas will help them make better decisions
+when creating other systems.
+—Dmitriy Ryaboy, VP of software engineering at Zymergen
+
+=== PAGE 6 ===
+Gwen Shapira, Todd Palino,
+Rajini Sivaram, and Krit Petty
+Kafka: The Definitive Guide
+Real-Time Data and Stream Processing at Scale
+SECOND EDITION
+Boston Farnham Sebastopol TokyoBeijing Boston Farnham Sebastopol TokyoBeijing
+
+=== PAGE 7 ===
+978-1-492-08736-6
+[LSI]
+Kafka: The Definitive Guide
+by Gwen Shapira, Todd Palino, Rajini Sivaram, and Krit Petty
+Copyright © 2022 Chen Shapira, Todd Palino, Rajini Sivaram, and Krit Petty. All rights reserved.
+Printed in the United States of America.
+Published by O’Reilly Media, Inc., 1005 Gravenstein Highway North, Sebastopol, CA 95472.
+O’Reilly books may be purchased for educational, business, or sales promotional use. Online editions are
+also available for most titles (http://oreilly.com). For more information, contact our corporate/institutional
+sales department: 800-998-9938 or corporate@oreilly.com.
+Acquisitions Editor: Jessica Haberman
+Development Editor: Gary O’Brien
+Production Editor: Kate Galloway
+Copyeditor: Sonia Saruba
+Proofreader: Piper Editorial Consulting, LLC
+Indexer: Ellen Troutman-Zaig
+Interior Designer: David Futato
+Cover Designer: Karen Montgomery
+Illustrator: Kate Dullea
+September 2017:  First Edition
+November 2021:  Second Edition
+Revision History for the Second Edition
+2021-11-05: First Release
+See http://oreilly.com/catalog/errata.csp?isbn=9781492043089 for release details.
+The O’Reilly logo is a registered trademark of O’Reilly Media, Inc. Kafka: The Definitive Guide, the cover
+image, and related trade dress are trademarks of O’Reilly Media, Inc.
+The views expressed in this work are those of the authors, and do not represent the publisher’s views.
+While the publisher and the authors have used good faith efforts to ensure that the information and
+instructions contained in this work are accurate, the publisher and the authors disclaim all responsibility
+for errors or omissions, including without limitation responsibility for damages resulting from the use of
+or reliance on this work. Use of the information and instructions contained in this work is at your own
+risk. If any code samples or other technology this work contains or describes is subject to open source
+licenses or the intellectual property rights of others, it is your responsibility to ensure that your use
+thereof complies with such licenses and/or rights.
+This work is part of a collaboration between O’Reilly and Confluent. See our statement of editorial
+independence.
+
+=== PAGE 8 ===
+Table of Contents
+Foreword to the Second Edition. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .  xiii
+Foreword to the First Edition. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .  xv
+Preface. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .  xix
+1. Meet Kafka. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .  1
+Publish/Subscribe Messaging                                                                                           1
+How It Starts                                                                                                                    2
+Individual Queue Systems                                                                                             3
+Enter Kafka                                                                                                                         4
+Messages and Batches                                                                                                    4
+Schemas                                                                                                                           5
+Topics and Partitions                                                                                                     5
+Producers and Consumers                                                                                            6
+Brokers and Clusters                                                                                                      8
+Multiple Clusters                                                                                                            9
+Why Kafka?                                                                                                                       10
+Multiple Producers                                                                                                       10
+Multiple Consumers                                                                                                    10
+Disk-Based Retention                                                                                                  11
+Scalable                                                                                                                          11
+High Performance                                                                                                        11
+Platform Features                                                                                                         11
+The Data Ecosystem                                                                                                        12
+Use Cases                                                                                                                       12
+Kafka’s Origin                                                                                                                   14
+iii
+
+=== PAGE 9 ===
+LinkedIn’s Problem                                                                                                      14
+The Birth of Kafka                                                                                                        15
+Open Source                                                                                                                  16
+Commercial Engagement                                                                                            16
+The Name                                                                                                                      17
+Getting Started with Kafka                                                                                             17
+2. Installing Kafka. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .  19
+Environment Setup                                                                                                          19
+Choosing an Operating System                                                                                  19
+Installing Java                                                                                                                19
+Installing ZooKeeper                                                                                                   20
+Installing a Kafka Broker                                                                                                23
+Configuring the Broker                                                                                                   24
+General Broker Parameters                                                                                         25
+Topic Defaults                                                                                                               27
+Selecting Hardware                                                                                                          33
+Disk Throughput                                                                                                          33
+Disk Capacity                                                                                                                34

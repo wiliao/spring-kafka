@@ -1,0 +1,200 @@
+                    serializedName = data.getName().getBytes("UTF-8");
+                    stringSize = serializedName.length;
+                } else {
+                    serializedName = new byte[0];
+                    stringSize = 0;
+                }
+            }
+            ByteBuffer buffer = ByteBuffer.allocate(4 + 4 + stringSize);
+            buffer.putInt(data.getID());
+            buffer.putInt(stringSize);
+            buffer.put(serializedName);
+            return buffer.array();
+        } catch (Exception e) {
+            throw new SerializationException(
+                "Error when serializing Customer to byte[] " + e);
+        }
+    }
+    @Override
+    public void close() {
+        // nothing to close
+    }
+}
+Configuring a producer with this CustomerSerializer will allow you to define
+ProducerRecord<String, Customer> , and send Customer data and pass Customer
+objects directly to the producer. This example is pretty simple, but you can see how
+fragile the code is. If we ever have too many customers, for example, and need to
+change customerID to Long, or if we ever decide to add a startDate field to
+Customer, we will have a serious issue in maintaining compatibility between old and
+new messages. Debugging compatibility issues between different versions of serializ‐
+ers and deserializers is fairly challenging: you need to compare arrays of raw bytes. To
+make matters even worse, if multiple teams in the same company end up writing
+Customer data to Kafka, they will all need to use the same serializers and modify the
+code at the exact same time.
+For these reasons, we recommend using existing serializers and deserializers such as
+JSON, Apache Avro, Thrift, or Protobuf. In the following section, we will describe
+Apache Avro and then show how to serialize Avro records and send them to Kafka.
+Serializers | 63
+
+=== PAGE 93 ===
+Serializing Using Apache Avro
+Apache Avro is a language-neutral data serialization format. The project was created
+by Doug Cutting to provide a way to share data files with a large audience.
+Avro data is described in a language-independent schema. The schema is usually
+described in JSON, and the serialization is usually to binary files, although serializing
+to JSON is also supported. Avro assumes that the schema is present when reading and
+writing files, usually by embedding the schema in the files themselves.
+One of the most interesting features of Avro, and what makes it a good fit for use in a
+messaging system like Kafka, is that when the application that is writing messages
+switches to a new but compatible schema, the applications reading the data can con‐
+tinue processing messages without requiring any change or update.
+Suppose the original schema was:
+{"namespace": "customerManagement.avro",
+ "type": "record",
+ "name": "Customer",
+ "fields": [
+     {"name": "id", "type": "int"},
+     {"name": "name",  "type": "string"},
+     {"name": "faxNumber", "type": ["null", "string"], "default": "null"} 
+ ]
+}
+id and name fields are mandatory, while faxNumber is optional and defaults to
+null.
+We used this schema for a few months and generated a few terabytes of data in this
+format. Now suppose we decide that in the new version, we will upgrade to the 21st
+century and will no longer include a fax number field and will instead use an email
+field.
+The new schema would be:
+{"namespace": "customerManagement.avro",
+ "type": "record",
+ "name": "Customer",
+ "fields": [
+     {"name": "id", "type": "int"},
+     {"name": "name",  "type": "string"},
+     {"name": "email", "type": ["null", "string"], "default": "null"}
+ ]
+}
+Now, after upgrading to the new version, old records will contain faxNumber and new
+records will contain email. In many organizations, upgrades are done slowly and
+over many months. So we need to consider how pre-upgrade applications that still
+64 | Chapter 3: Kafka Producers: Writing Messages to Kafka
+
+=== PAGE 94 ===
+use the fax numbers and post-upgrade applications that use email will be able to han‐
+dle all the events in Kafka.
+The reading application will contain calls to methods similar to getName(), getId(),
+and getFaxNumber(). If it encounters a message written with the new schema, get
+Name() and getId() will continue working with no modification, but getFax
+Number() will return null because the message will not contain a fax number.
+Now suppose we upgrade our reading application and it no longer has the getFax
+Number() method but rather getEmail(). If it encounters a message written with the
+old schema, getEmail() will return null because the older messages do not contain
+an email address.
+This example illustrates the benefit of using Avro: even though we changed the
+schema in the messages without changing all the applications reading the data, there
+will be no exceptions or breaking errors and no need for expensive updates of exist‐
+ing data.
+However, there are two caveats to this scenario:
+• The schema used for writing the data and the schema expected by the reading
+application must be compatible. The Avro documentation includes compatibility
+rules.
+• The deserializer will need access to the schema that was used when writing the
+data, even when it is different from the schema expected by the application that
+accesses the data. In Avro files, the writing schema is included in the file itself,
+but there is a better way to handle this for Kafka messages. We will look at that
+next.
+Using Avro Records with Kafka
+Unlike Avro files, where storing the entire schema in the data file is associated with a
+fairly reasonable overhead, storing the entire schema in each record will usually more
+than double the record size. However, Avro still requires the entire schema to be
+present when reading the record, so we need to locate the schema elsewhere. To ach‐
+ieve this, we follow a common architecture pattern and use a Schema Registry. The
+Schema Registry is not part of Apache Kafka, but there are several open source
+options to choose from. We’ll use the Confluent Schema Registry for this example.
+Y ou can find the Schema Registry code on GitHub, or you can install it as part of the
+Confluent Platform. If you decide to use the Schema Registry, we recommend check‐
+ing the documentation on Confluent.
+The idea is to store all the schemas used to write data to Kafka in the registry. Then
+we simply store the identifier for the schema in the record we produce to Kafka. The
+consumers can then use the identifier to pull the record out of the Schema Registry
+Serializers | 65
+
+=== PAGE 95 ===
+and deserialize the data. The key is that all this work—storing the schema in the reg‐
+istry and pulling it up when required—is done in the serializers and deserializers. The
+code that produces data to Kafka simply uses the Avro serializer just like it would any
+other serializer. Figure 3-3 demonstrates this process.
+Figure 3-3. Flow diagram of serialization and deserialization of Avro records
+Here is an example of how to produce generated Avro objects to Kafka (see the Avro
+documentation for how to generate objects from Avro schemas):
+Properties props = new Properties();
+props.put("bootstrap.servers", "localhost:9092");
+props.put("key.serializer",
+   "io.confluent.kafka.serializers.KafkaAvroSerializer");
+props.put("value.serializer",
+   "io.confluent.kafka.serializers.KafkaAvroSerializer"); 
+props.put("schema.registry.url", schemaUrl); 
+String topic = "customerContacts";
+Producer<String, Customer> producer = new KafkaProducer<>(props); 
+// We keep producing new events until someone ctrl-c
+while (true) {
+    Customer customer = CustomerGenerator.getNext(); 
+    System.out.println("Generated customer " +
+        customer.toString());
+    ProducerRecord<String, Customer> record =
+        new ProducerRecord<>(topic, customer.getName(), customer); 
+    producer.send(record); 
+}
+We use the KafkaAvroSerializer to serialize our objects with Avro.  Note that
+the KafkaAvroSerializer can also handle primitives, which is why we can later
+use String as the record key and our Customer object as the value.
+66 | Chapter 3: Kafka Producers: Writing Messages to Kafka
+
+=== PAGE 96 ===
+schema.registry.url is the configuration of the Avro serializer that will be
+passed to the serializer by the producer. It simply points to where we store the
+schemas.
+Customer is our generated object. We tell the producer that our records will con‐
+tain Customer as the value.
+Customer class is not a regular Java class (plain old Java object, or POJO) but
+rather a specialized Avro object, generated from a schema using Avro code gener‐
+ation. The Avro serializer can only serialize Avro objects, not POJO. Generating
+Avro classes can be done either using the avro-tools.jar or the Avro Maven plug-
+in, both part of Apache Avro. See the Apache Avro Getting Started (Java) guide
+for details on how to generate Avro classes.
+We also instantiate ProducerRecord with Customer as the value type, and pass a
+Customer object when creating the new record.
+That’s it. We send the record with our Customer object, and KafkaAvro
+Serializer will handle the rest.
+Avro also allows you to use generic Avro objects, that are used as key-value maps,
+rather than generated Avro objects with getters and setters that match the schema
+that was used to generate them. To use generic Avro objects, you just need to provide
+the schema:
+Properties props = new Properties();
+props.put("bootstrap.servers", "localhost:9092");
+props.put("key.serializer",
+   "io.confluent.kafka.serializers.KafkaAvroSerializer"); 
+props.put("value.serializer",
+   "io.confluent.kafka.serializers.KafkaAvroSerializer");
+props.put("schema.registry.url", url); 
+String schemaString =
+    "{\"namespace\": \"customerManagement.avro\",
+     "\"type\": \"record\", " + 
+     "\"name\": \"Customer\"," +
+     "\"fields\": [" +
+      "{\"name\": \"id\", \"type\": \"int\"}," +
+      "{\"name\": \"name\", \"type\": \"string\"}," +
+      "{\"name\": \"email\", \"type\": " + "[\"null\",\"string\"], " +
+       "\"default\":\"null\" }" +
+    "]}";
+Producer<String, GenericRecord> producer =
+   new KafkaProducer<String, GenericRecord>(props); 
+Schema.Parser parser = new Schema.Parser();
+Serializers | 67
+
+=== PAGE 97 ===
+Schema schema = parser.parse(schemaString);
+for (int nCustomers = 0; nCustomers < customers; nCustomers++) {
+    String name = "exampleCustomer" + nCustomers;
+    String email = "example " + nCustomers + "@example.com";
+    GenericRecord customer = new GenericData.Record(schema); 

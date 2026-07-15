@@ -1,0 +1,200 @@
+CHAPTER 5
+Managing Apache Kafka Programmatically
+There are many CLI and GUI tools for managing Kafka (we’ll discuss them in Chap‐
+ter 9), but there are also times when you want to execute some administrative com‐
+mands from within your client application. Creating new topics on demand based on
+user input or data is an especially common use case: Internet of Things (IoT) apps
+often receive events from user devices, and write events to topics based on the device
+type. If the manufacturer produces a new type of device, you either have to remem‐
+ber, via some process, to also create a topic, or the application can dynamically create
+a new topic if it receives events with an unrecognized device type. The second alter‐
+native has downsides, but avoiding the dependency on an additional process to gen‐
+erate topics is an attractive feature in the right scenarios.
+Apache Kafka added the AdminClient in version 0.11 to provide a programmatic API
+for administrative functionality that was previously done in the command line: list‐
+ing, creating, and deleting topics; describing the cluster; managing ACLs; and modi‐
+fying configuration.
+Here’s one example. Y our application is going to produce events to a specific topic.
+This means that before producing the first event, the topic has to exist. Before Apache
+Kafka added the AdminClient, there were few options, none of them particularly
+user-friendly: you could capture an UNKNOWN_TOPIC_OR_PARTITION exception from
+the producer.send() method and let your user know that they needed to create the
+topic, or you could hope that the Kafka cluster you were writing to enabled automatic
+topic creation, or you could try to rely on internal APIs and deal with the conse‐
+quences of no compatibility guarantees. Now that Apache Kafka provides Admin‐
+Client, there is a much better solution: use AdminClient to check whether the topic
+exists, and if it does not, create it on the spot.
+113
+
+=== PAGE 143 ===
+In this chapter we’ll give an overview of the AdminClient before we drill down into
+the details of how to use it in your applications. We’ll focus on the most commonly
+used functionality: management of topics, consumer groups, and entity
+configuration.
+AdminClient Overview
+As you start using Kafka AdminClient, it helps to be aware of its core design princi‐
+ples. When you understand how the AdminClient was designed and how it should be
+used, the specifics of each method will be much more intuitive.
+Asynchronous and Eventually Consistent API
+Perhaps the most important thing to understand about Kafka’s AdminClient is that it
+is asynchronous. Each method returns immediately after delivering a request to the
+cluster controller, and each method returns one or more Future objects. Future
+objects are the result of asynchronous operations, and they have methods for check‐
+ing the status of the asynchronous operation, canceling it, waiting for it to complete,
+and executing functions after its completion. Kafka’s AdminClient wraps the Future
+objects into Result objects, which provide methods to wait for the operation to com‐
+plete and helper methods for common follow-up operations.  For example, Kafka
+AdminClient.createTopics returns the CreateTopicsResult object, which lets you
+wait until all topics are created, check each topic status individually, and retrieve the
+configuration of a specific topic after it was created.
+Because Kafka’s propagation of metadata from the controller to the brokers is asyn‐
+chronous, the Futures that AdminClient APIs return are considered complete when
+the controller state has been fully updated. At that point, not every broker might be
+aware of the new state, so a listTopics request may end up handled by a broker that
+is not up-to-date and will not contain a topic that was very recently created.  This
+property is also called eventual consistency: eventually every broker will know about
+every topic, but we can’t guarantee exactly when this will happen.
+Options
+Every method in AdminClient takes as an argument an Options object that is specific
+to that method. For example, the listTopics method takes the ListTopicsOptions
+object as an argument, and describeCluster takes DescribeClusterOptions as an
+argument. Those objects contain different settings for how the request will be han‐
+dled by the broker. The one setting that all AdminClient methods have is timeoutMs:
+this controls how long the client will wait for a response from the cluster before
+throwing a TimeoutException. This limits the time in which your application may be
+blocked by AdminClient operation. Other options include whether listTopics
+114 | Chapter 5: Managing Apache Kafka Programmatically
+
+=== PAGE 144 ===
+should also return internal topics and whether describeCluster should also return
+which operations the client is authorized to perform on the cluster.
+Flat Hierarchy
+All admin operations supported by the Apache Kafka protocol are implemented in
+KafkaAdminClient directly. There is no object hierarchy or namespaces. This is a bit
+controversial as the interface can be quite large and perhaps a bit overwhelming, but
+the main benefit is that if you want to know how to programmatically perform any
+admin operation on Kafka, you have exactly one JavaDoc to search, and your IDE
+autocomplete will be quite handy. Y ou don’t have to wonder whether you are just
+missing the right place to look. If it isn’t in AdminClient, it was not implemented yet
+(but contributions are welcome!).
+If you are interested in contributing to Apache Kafka, take a look at
+our “How to Contribute” guide . Start with smaller, noncontrover‐
+sial bug fixes and improvements before tackling a more significant
+change to the architecture or the protocol. Noncode contributions
+such as bug reports, documentation improvements, responses to
+questions, and blog posts are also encouraged.
+Additional Notes
+All the operations that modify the cluster state—create, delete, and alter—are handled
+by the controller. Operations that read the cluster state—list and describe—can be
+handled by any broker and are directed to the least-loaded broker (based on what the
+client knows). This shouldn’t impact you as an API user, but it can be good to know
+in case you are seeing unexpected behavior, you notice that some operations succeed
+while others fail, or if you are trying to figure out why an operation is taking too long.
+At the time we are writing this chapter (Apache Kafka 2.5 is about to be released),
+most admin operations can be performed either through AdminClient or directly by
+modifying the cluster metadata in ZooKeeper. We highly encourage you to never use
+ZooKeeper directly, and if you absolutely have to, report this as a bug to Apache
+Kafka. The reason is that in the near future, the Apache Kafka community will
+remove the ZooKeeper dependency, and every application that uses ZooKeeper
+directly for admin operations will have to be modified. On the other hand, the
+AdminClient API will remain exactly the same, just with a different implementation
+inside the Kafka cluster.
+AdminClient Lifecycle: Creating, Configuring, and Closing
+To use Kafka’s AdminClient, the first thing you have to do is construct an instance of
+the AdminClient class. This is quite straightforward:
+AdminClient Lifecycle: Creating, Configuring, and Closing | 115
+
+=== PAGE 145 ===
+Properties props = new Properties();
+props.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092");
+AdminClient admin = AdminClient.create(props);
+// TODO: Do something useful with AdminClient
+admin.close(Duration.ofSeconds(30));
+The static create method takes as an argument a Properties object with configura‐
+tion. The only mandatory configuration is the URI for your cluster: a comma-
+separated list of brokers to connect to. As usual, in production environments, you
+want to specify at least three brokers just in case one is currently unavailable. We’ll
+discuss how to configure a secure and authenticated connection separately in
+Chapter 11.
+If you start an AdminClient, eventually you want to close it. It is important to remem‐
+ber that when you call close, there could still be some AdminClient operations in
+progress. Therefore, the close method accepts a timeout parameter. Once you call
+close, you can’t call any other methods and send any more requests, but the client
+will wait for responses until the timeout expires. After the timeout expires, the client
+will abort all ongoing operations with timeout exception and release all resources.
+Calling close without a timeout implies that the client will wait as long as it takes for
+all ongoing operations to complete.
+Y ou probably recall from Chapters 3 and 4 that the KafkaProducer and Kafka
+Consumer have quite a few important configuration parameters. The good news is
+that AdminClient is much simpler, and there is not much to configure. Y ou can read
+about all the configuration parameters in the Kafka documentation. In our opinion,
+the important configuration parameters are described in the following sections.
+client.dns.lookup
+This configuration was introduced in the Apache Kafka 2.1.0 release.
+By default, Kafka validates, resolves, and creates connections based on the hostname
+provided in the bootstrap server configuration (and later in the names returned by
+the brokers as specified in the advertised.listeners configuration). This simple
+model works most of the time but fails to cover two important use cases: the use of
+DNS aliases, especially in a bootstrap configuration, and the use of a single DNS that
+maps to multiple IP addresses. These sound similar but are slightly different. Let’s
+look at each of these mutually exclusive scenarios in a bit more detail.
+Use of a DNS alias
+Suppose you have multiple brokers with the following naming convention:
+broker1.hostname.com, broker2.hostname.com, etc. Rather than specifying all of
+them in a bootstrap server configuration, which can easily become challenging to
+maintain, you may want to create a single DNS alias that will map to all of them.
+116 | Chapter 5: Managing Apache Kafka Programmatically
+
+=== PAGE 146 ===
+Y ou’ll use all-brokers.hostname.com for bootstrapping, since you don’t actually
+care which broker gets the initial connection from clients. This is all very convenient,
+except if you use SASL to authenticate. If you use SASL, the client will try to authenti‐
+cate all-brokers.hostname.com, but the server principal will be broker2.host
+name.com. If the names don’t match, SASL will refuse to authenticate (the broker
+certificate could be a man-in-the-middle attack), and the connection will fail.
+In this scenario, you’ll want to use client.dns.lookup=resolve_canonical_boot
+strap_servers_only. With this configuration, the client will “expend” the DNS alias,
+and the result will be the same as if you included all the broker names the DNS alias
+connects to as brokers in the original bootstrap list.
+DNS name with multiple IP addresses
+With modern network architectures, it is common to put all the brokers behind a
+proxy or a load balancer. This is especially common if you use Kubernetes, where
+load balancers are necessary to allow connections from outside the Kubernetes clus‐
+ter. In these cases, you don’t want the load balancers to become a single point of fail‐
+ure. It is therefore very common to have broker1.hostname.com point at a list of IPs,
+all of which resolve to load balancers, and all of which route traffic to the same
+broker. These IPs are also likely to change over time. By default, the Kafka client will
+just try to connect to the first IP that the hostname resolves. This means that if that IP
+becomes unavailable, the client will fail to connect, even though the broker is fully
+available. It is therefore highly recommended to use client.dns.lookup=
+use_all_dns_ips to make sure the client doesn’t miss out on the benefits of a highly
+available load balancing layer.
+request.timeout.ms
+This configuration limits the time that your application can spend waiting for
+AdminClient to respond. This includes the time spent on retrying if the client
+receives a retriable error.
+The default value is 120 seconds, which is quite long, but some AdminClient opera‐
+tions, especially consumer group management commands, can take a while to
+respond. As we mentioned in “ AdminClient Overview” on page 114, each Admin‐
+Client method accepts an Options object, which can contain a timeout value that
+applies specifically to that call. If an AdminClient operation is on the critical path for
+your application, you may want to use a lower timeout value and handle a lack of
+timely response from Kafka in a different way. A common example is that services try
+to validate the existence of specific topics when they first start, but if Kafka takes
+longer than 30 seconds to respond, you may want to continue starting the server and
+validate the existence of topics later (or skip this validation entirely).
+AdminClient Lifecycle: Creating, Configuring, and Closing | 117
+
+=== PAGE 147 ===
+Essential Topic Management
+Now that we created and configured an AdminClient, it’s time to see what we can do
+with it. The most common use case for Kafka’s AdminClient is topic management.
+This includes listing topics, describing them, creating topics, and deleting them.
+Let’s start by listing all topics in the cluster:
+ListTopicsResult topics = admin.listTopics();
+topics.names().get().forEach(System.out::println);
+Note that admin.listTopics() returns the ListTopicsResult object, which is a thin
+wrapper over a collection of Futures. Note also that topics.name() returns a Future
+set of name. When we call get() on this Future, the executing thread will wait until
+the server responds with a set of topic names, or we get a timeout exception. Once we
+get the list, we iterate over it to print all the topic names.

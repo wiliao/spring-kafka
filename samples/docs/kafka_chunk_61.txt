@@ -1,0 +1,200 @@
+consumer groups or specific group info, or reset consumer group offset information.
+ZooKeeper-Based Consumer Groups
+In older versions of Kafka, consumer groups could be managed
+and maintained in ZooKeeper. This behavior was deprecated in
+versions 0.11.0.* and later, and old consumer groups are no longer
+used. Some versions of the provided scripts may still show depre‐
+cated --zookeeper connection string commands, but it is not rec‐
+ommended to use them unless you have an old environment with
+some consumer groups that have not upgraded to later versions of
+Kafka.
+List and Describe Groups
+To list consumer groups, use the --bootstrap-server and --list parameters. Ad
+hoc consumers utilizing the kafka-consumer-groups.sh script will show up as
+console-consumer-<generated_id> in the consumer list:
+# kafka-consumer-groups.sh --bootstrap-server localhost:9092 --list
+console-consumer-95554
+console-consumer-9581
+my-consumer
+#
+For any group listed, you can get more details by changing the --list parameter to
+--describe and adding the --group parameter. This will list all the topics and parti‐
+tions that the group is consuming from, as well as additional information such as the
+offsets for each topic partition. Table 12-1 has a full description of all the fields pro‐
+vided in the output.
+For example, get consumer group details for the ad hoc group named “my-
+consumer”:
+312 | Chapter 12: Administering Kafka
+
+=== PAGE 342 ===
+# kafka-consumer-groups.sh --bootstrap-server localhost:9092
+--describe --group my-consumer
+GROUP          TOPIC          PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  
+LAG        CONSUMER-ID                                       
+HOST                           CLIENT-ID
+my-consumer     my-topic       0          2               4               
+2          consumer-1-029af89c-873c-4751-a720-cefd41a669d6   /
+127.0.0.1                     consumer-1
+my-consumer     my-topic       1          2               3               
+1          consumer-1-029af89c-873c-4751-a720-cefd41a669d6   /
+127.0.0.1                     consumer-1
+my-consumer     my-topic       2          2               3               
+1          consumer-2-42c1abd4-e3b2-425d-a8bb-e1ea49b29bb2   /
+127.0.0.1                     consumer-2
+#
+Table 12-1. Fields provided for group named “my-consumer”
+Field Description
+GROUP The name of the consumer group.
+TOPIC The name of the topic being consumed.
+PARTITION The ID number of the partition being consumed.
+CURRENT-OFFSET The next offset to be consumed by the consumer group for this topic partition. This is the position of the
+consumer within the partition.
+LOG-END-OFFSET The current high-water mark offset from the broker for the topic partition. This is the offset of the next
+message to be produced to this partition.
+LAG The difference between the consumer Current-Offset and the broker Log-End-Offset for this topic partition.
+CONSUMER-ID A generated unique consumer-id based on the provided client-id.
+HOST Address of the host the consumer group is reading from.
+CLIENT-ID String provided by the client identifying the client that is consuming from the group.
+Delete Group
+Deletion of consumer groups can be performed with the --delete argument. This
+will remove the entire group, including all stored offsets for all topics that the group
+is consuming. To perform this action, all consumers in the group should be shut
+down as the consumer group must not have any active members. If you attempt to
+delete a group that is not empty, an error stating “The group is not empty” will be
+thrown and nothing will happen. It is also possible to use the same command to
+delete offsets for a single topic that the group is consuming without deleting the
+entire group by adding the --topic argument and specifying which topic offsets to
+delete.
+Consumer Groups | 313
+
+=== PAGE 343 ===
+Here is an example of deleting the entire consumer group named “my-consumer”:
+# kafka-consumer-groups.sh --bootstrap-server localhost:9092 --delete --group 
+my-consumer
+Deletion of requested consumer groups ('my-consumer') was successful.
+#
+Offset Management
+In addition to displaying and deleting the offsets for a consumer group, it is also pos‐
+sible to retrieve the offsets and store new offsets in a batch.  This is useful for resetting
+the offsets for a consumer when there is a problem that requires messages to be
+reread, or for advancing offsets and skipping past a message that the consumer is
+having a problem with (e.g., if there is a badly formatted message that the consumer
+cannot handle).
+Export offsets
+To export offsets from a consumer group to a CSV file, use the --reset-offsets
+argument with the --dry-run option. This will allow us to create an export of the
+current offsets in a file format that can be reused for importing or rolling back the
+offsets later. The CSV format export will be in the following configuration:
+<topic-name>,<partition-number>,<offset>
+Running the same command without the --dry-run option will reset the offsets com‐
+pletely, so be careful.
+Here is an example of exporting the offsets for the topic “my-topic” that is being con‐
+sumed by the consumer group named “my-consumer” to a file named offsets.csv:
+# kafka-consumer-groups.sh --bootstrap-server localhost:9092
+--export --group my-consumer --topic my-topic
+--reset-offsets --to-current --dry-run > offsets.csv
+# cat offsets.csv
+my-topic,0,8905
+my-topic,1,8915
+my-topic,2,9845
+my-topic,3,8072
+my-topic,4,8008
+my-topic,5,8319
+my-topic,6,8102
+my-topic,7,12739
+#
+Import offsets
+The import offset tool is the opposite of exporting. It takes the file produced by
+exporting offsets in the previous section and uses it to set the current offsets for the
+314 | Chapter 12: Administering Kafka
+
+=== PAGE 344 ===
+consumer group. A common practice is to export the current offsets for the con‐
+sumer group, make a copy of the file (so that you preserve a backup), and edit the
+copy to replace the offsets with the desired values.
+Stop Consumers First
+Before performing this step, it is important that all consumers in
+the group are stopped. They will not read the new offsets if they are
+written while the consumer group is active. The consumers will
+just overwrite the imported offsets.
+In the following example, we import the offsets for the consumer group named “my-
+consumer” from the file we created in the last example named offsets.csv:
+# kafka-consumer-groups.sh --bootstrap-server localhost:9092
+--reset-offsets --group my-consumer
+--from-file offsets.csv --execute
+  TOPIC                          PARTITION  NEW-OFFSET
+  my-topic                        0          8905
+  my-topic                        1          8915
+  my-topic                        2          9845
+  my-topic                        3          8072
+  my-topic                        4          8008
+  my-topic                        5          8319
+  my-topic                        6          8102
+  my-topic                        7          12739
+#
+Dynamic Configuration Changes
+There is a plethora of configurations for topics, clients, brokers, and more that can be
+updated dynamically during runtime without having to shut down or redeploy a clus‐
+ter. The kafka-configs.sh is the main tool for modifying these configs. Currently
+there are four main categories, or entity-types, of dynamic config changes that can be
+made: topics, brokers, users, and clients. For each entity-type there are specific config‐
+urations that can be overridden. New dynamic configs are being added constantly
+with each release of Kafka, so it is good to ensure you have the same version of this
+tool that matches the version of Kafka you are running. For ease of setting up these
+configs consistently via automation, the --add-config-file argument can be used
+with a preformatted file of all the configs you want to manage and update.
+Overriding Topic Configuration Defaults
+There are many configurations that are set by default for topics that are defined in the 
+static broker configuration files (e.g., retention time policy). With dynamic configura‐
+tions, we can override the cluster0level defaults for individual topics to accommodate
+Dynamic Configuration Changes | 315
+
+=== PAGE 345 ===
+different use cases within a single cluster. Table 12-2 shows the valid configuration
+keys for topics that can be altered dynamically.
+The format of the command to change a topic configuration is:
+kafka-configs.sh --bootstrap-server localhost:9092
+--alter --entity-type topics --entity-name <topic-name>
+--add-config <key>=<value>[,<key>=<value>...]
+Here is an example of setting the retention for the topic named “my-topic” to 1 hour
+(3,600,000 ms):
+# kafka-configs.sh --bootstrap-server localhost:9092
+--alter --entity-type topics --entity-name my-topic
+--add-config retention.ms=3600000
+Updated config for topic: "my-topic".
+#
+Table 12-2. Valid keys for topics
+Configuration key Description
+cleanup.policy If set to compact, the messages in this topic will be discarded and only the most
+recent message with a given key is retained (log compacted).
+compression.type The compression type used by the broker when writing message batches for this topic to
+disk.
+delete.retention.ms How long, in milliseconds, deleted tombstones will be retained for this topic. Only valid
+for log compacted topics.
+file.delete.delay.ms How long, in milliseconds, to wait before deleting log segments and indices for this topic
+from disk.
+flush.messages How many messages are received before forcing a flush of this topic’s messages to disk.
+flush.ms How long, in milliseconds, before forcing a flush of this topic’s messages to disk.
+follower.replication.
+throttled.replicas
+A list of replicas for which log replication should be throttled by the follower.
+index.interval.bytes How many bytes of messages can be produced between entries in the log segment’s
+index.
+leader.replication.
+throttled.replica
+A list of replicas for which log replication should be throttled by the leader.
+max.compaction.lag.ms Maximum time limit a message won’t be eligible for compaction in the log.
+max.message.bytes The maximum size of a single message for this topic, in bytes.
+message.downconver
+sion.enable
+Allows the message format version to be down-converted to the previous version if
+enabled with some overhead.
+message.format.version The message format version that the broker will use when writing messages to disk.
+Must be a valid API version number.
+message.timestamp.
+difference.max.ms
+The maximum allowed difference, in milliseconds, between the message timestamp and
+the broker timestamp when the message is received. This is only valid if the
+message.timestamp.type is set to CreateTime.
+316 | Chapter 12: Administering Kafka
+

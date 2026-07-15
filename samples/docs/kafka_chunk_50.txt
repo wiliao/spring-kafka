@@ -1,0 +1,200 @@
+254 | Chapter 10: Cross-Cluster Data Mirroring
+
+=== PAGE 284 ===
+MirrorMaker metrics monitoring
+In addition to metrics from Connect, MirrorMaker adds metrics to monitor mir‐
+roring throughput and replication latency. The replication latency metric
+replication-latency-ms shows the time interval between the record timestamp
+and the time at which the record was successfully produced to the target cluster.
+This is useful to detect if the target is not keeping up with the source in a timely
+manner. Increased latency during peak hours may be OK if there is sufficient
+capacity to catch up later, but sustained increase in latency may indicate insuffi‐
+cient capacity. Other metrics like record-age-ms, which shows the age of records
+at the time of replication, byte-rate, which shows replication throughout, and
+checkpoint-latency-ms, which shows offset migration latency, can also be very
+useful. MirrorMaker also emits periodic heartbeats by default, which can be used
+to monitor its health.
+Lag monitoring
+Y ou will definitely want to know if the target cluster is falling behind the source.
+The lag is the difference in offsets between the latest message in the source Kafka
+cluster and the latest message in the target cluster. See Figure 10-7.
+Figure 10-7. Monitoring the lag difference in offsets
+In Figure 10-7, the last offset in the source cluster is 7, and the last offset in the
+target is 5—meaning there is a lag of 2 messages.
+There are two ways to track this lag, and neither is perfect:
+• Check the latest offset committed by MirrorMaker to the source Kafka clus‐
+ter. Y ou can use the kafka-consumer-groups tool to check for each partition
+MirrorMaker is reading— the offset of the last event in the partition, the last
+offset MirrorMaker committed, and the lag between them. This indicator is
+not 100% accurate because MirrorMaker doesn’t commit offsets all the time.
+It commits offsets every minute by default, so you will see the lag grow for a
+minute and then suddenly drop. In the diagram, the real lag is 2, but the
+kafka-consumer-groups tool will report a lag of 5 because MirrorMaker
+Apache Kafka’s MirrorMaker | 255
+
+=== PAGE 285 ===
+hasn’t committed offsets for more recent messages yet. LinkedIn’s Burrow
+monitors the same information but has a more sophisticated method to
+determine whether the lag represents a real problem, so you won’t get false
+alerts.
+• Check the latest offset read by MirrorMaker (even if it isn’t committed). The
+consumers embedded in MirrorMaker publish key metrics in JMX. One of
+them is the consumer maximum lag (over all the partitions it is consuming).
+This lag is also not 100% accurate because it is updated based on what the
+consumer read but doesn’t take into account whether the producer managed
+to send those messages to the destination Kafka cluster and whether they
+were acknowledged successfully. In this example, the MirrorMaker con‐
+sumer will report a lag of 1 message rather than 2, because it already read
+message 6—even though the message wasn’t produced to the destination yet.
+Note that if MirrorMaker skips or drops messages, neither method will detect an
+issue because they just track the latest offset. Confluent Control Center is a com‐
+mercial tool that monitors message counts and checksums and closes this moni‐
+toring gap.
+Producer and consumer metrics monitoring
+The Kafka Connect framework used by MirrorMaker contains a producer and a
+consumer. Both have many available metrics, and we recommend collecting and
+tracking them. The Kafka documentation lists all the available metrics. Here are a
+few metrics that are useful in tuning MirrorMaker performance:
+Consumer
+fetch-size-avg, fetch-size-max, fetch-rate, fetch-throttle-time-avg,
+and fetch-throttle-time-max
+Producer
+batch-size-avg, batch-size-max, requests-in-flight, and record-
+retry-rate
+Both
+io-ratio and io-wait-ratio
+Canary
+If you monitor everything else, a canary isn’t strictly necessary, but we like to add
+it in for multiple layers of monitoring. It provides a process that, every minute,
+sends an event to a special topic in the source cluster and tries to read the event
+from the destination cluster. It also alerts you if the event takes more than an
+acceptable amount of time to arrive. This can mean that MirrorMaker is lagging
+or that it isn’t available at all.
+256 | Chapter 10: Cross-Cluster Data Mirroring
+
+=== PAGE 286 ===
+Tuning MirrorMaker
+MirrorMaker is horizontally scalable. Sizing of the MirrorMaker cluster depends on
+the throughput you need and the lag you can tolerate. If you can’t tolerate any lag,
+you have to size MirrorMaker with enough capacity to keep up with your top
+throughput. If you can tolerate some lag, you can size MirrorMaker to be 75–80% uti‐
+lized 95–99% of the time. Then, expect some lag to develop when you are at peak
+throughput. Because MirrorMaker has spare capacity most of the time, it will catch
+up once the peak is over.
+Then you want to measure the throughput you get from MirrorMaker with a differ‐
+ent number of connector tasks—configured with the tasks.max parameter. This
+depends a lot on your hardware, datacenter, or cloud provider, so you will want to
+run your own tests. Kafka ships with the kafka-performance-producer tool. Use it to
+generate load on a source cluster and then connect MirrorMaker and start mirroring
+this load. Test MirrorMaker with 1, 2, 4, 8, 16, 24, and 32 tasks. Watch where perfor‐
+mance tapers off and set tasks.max just below this point. If you are consuming or
+producing compressed events (recommended, since bandwidth is the main bottle‐
+neck for cross-datacenter mirroring), MirrorMaker will have to decompress and
+recompress the events. This uses a lot of CPU, so keep an eye on CPU utilization as
+you increase the number of tasks. Using this process, you will find the maximum
+throughput you can get with a single MirrorMaker worker. If it is not enough, you
+will want to experiment with additional workers. If you are running MirrorMaker on
+an existing Connect cluster with other connectors, make sure you also take the load
+from those connectors into account when sizing the cluster.
+In addition, you may want to separate sensitive topics—those that absolutely require
+low latency and where the mirror must be as close to the source as possible—to a sep‐
+arate MirrorMaker cluster. This will prevent a bloated topic or an out-of-control pro‐
+ducer from slowing down your most sensitive data pipeline.
+This is pretty much all the tuning you can do to MirrorMaker itself. However, you
+can still increase the throughput of each task and each MirrorMaker worker.
+If you are running MirrorMaker across datacenters, tuning the TCP stack can help to
+increase the effective bandwidth. In Chapters 3 and 4, we saw that TCP buffer sizes
+can be configured for producers and consumers using send.buffer.bytes and
+receive.buffer.bytes. Similarly, broker-side buffer sizes can be configured using
+socket.send.buffer.bytes and socket.receive.buffer.bytes on brokers.  These
+configuration options should be combined with optimization of the network configu‐
+ration in Linux, as follows:
+Apache Kafka’s MirrorMaker | 257
+
+=== PAGE 287 ===
+• Increase the TCP buffer size ( net.core.rmem_default, net.core.rmem_max,
+net.core.wmem_default, net.core.wmem_max, and net.core.optmem_max)
+• Enable automatic window scaling (sysctl –w net.ipv4.tcp_window_scaling=1
+or add net.ipv4.tcp_window_scaling=1 to /etc/sysctl.conf)
+• Reduce the TCP slow start time (set /proc/sys/net/ipv4/tcp_slow_
+start_after_idle to 0)
+Note that tuning the Linux network is a large and complex topic. To understand more
+about these parameters and others, we recommend reading a network tuning guide
+such as Performance Tuning for Linux Servers by Sandra K. Johnson et al. (IBM Press).
+In addition, you may want to tune the underlying producers and consumers of Mir‐
+rorMaker. First, you will want decide whether the producer or the consumer is the
+bottleneck—is the producer waiting for the consumer to bring more data or the other
+way around? One way to decide is to look at the producer and consumer metrics you
+are monitoring. If one process is idle while the other is fully utilized, you know which
+one needs tuning. Another method is to do several thread dumps (using jstack) and
+see if the MirrorMaker threads are spending most of the time in poll or in send—
+more time spent polling usually means the consumer is the bottleneck, while more
+time spent sending shift points to the producer.
+If you need to tune the producer, the following configuration settings can be useful:
+linger.ms and batch.size
+If your monitoring shows that the producer consistently sends partially empty
+batches (i.e., batch-size-avg and batch-size-max metrics are lower than con‐
+figured batch.size), you can increase throughput by introducing a bit of latency.
+Increase linger.ms and the producer will wait a few milliseconds for the batches
+to fill up before sending them. If you are sending full batches and have memory
+to spare, you can increase batch.size and send larger batches.
+max.in.flight.requests.per.connection
+Limiting the number of in-flight requests to 1 is currently the only way for Mir‐
+rorMaker to guarantee that message ordering is preserved if some messages
+require multiple retries before they are successfully acknowledged. But this
+means every request that was sent by the producer has to be acknowledged by the
+target cluster before the next message is sent. This can limit throughput, espe‐
+cially if there is significant latency before the brokers acknowledge the messages.
+If message order is not critical for your use case, using the default value of 5 for
+max.in.flight.requests.per.connection can significantly increase your
+throughput.
+The following consumer configurations can increase throughput for the consumer:
+258 | Chapter 10: Cross-Cluster Data Mirroring
+
+=== PAGE 288 ===
+fetch.max.bytes
+If the metrics you are collecting show that fetch-size-avg and fetch-size-max
+are close to the fetch.max.bytes configuration, the consumer is reading as
+much data from the broker as it is allowed. If you have available memory, try
+increasing fetch.max.bytes to allow the consumer to read more data in each
+request.
+fetch.min.bytes and fetch.max.wait.ms
+If you see in the consumer metrics that fetch-rate is high, the consumer is
+sending too many requests to the brokers and not receiving enough data in each
+request. Try increasing both fetch.min.bytes and fetch.max.wait.ms so the
+consumer will receive more data in each request and the broker will wait until
+enough data is available before responding to the consumer request.
+Other Cross-Cluster Mirroring Solutions
+We looked in depth at MirrorMaker because this mirroring software arrives as part of
+Apache Kafka. However, MirrorMaker also has some limitations when used in prac‐
+tice. It is worthwhile to look at some of the alternatives to MirrorMaker and the ways
+they address MirrorMaker limitations and complexities. We describe a couple of open
+source solutions from Uber and LinkedIn and commercial solutions from Confluent.
+Uber uReplicator
+Uber ran legacy MirrorMaker at very large scale, and as the number of topics and
+partitions grew and the cluster throughput increased, it started running into several
+problems. As we saw earlier, the legacy MirrorMaker used consumers that were
+members of a single consumer group to consume from source topics. Adding Mirror‐
+Maker threads, adding MirrorMaker instances, bouncing MirrorMaker instances, or
+even adding new topics that match the regular expression used in the inclusion filter
+all caused consumers to rebalance. As we saw in Chapter 4, rebalancing stops all the
+consumers until new partitions can be assigned to each consumer. With a very large
+number of topics and partitions, this can take a while. This is especially true when
+using old consumers like Uber did. In some cases, this caused 5–10 minutes of inac‐
+tivity, causing mirroring to fall behind and accumulate a large backlog of events to
+mirror, which can take a long time to recover from. This caused very high latency for
+consumers reading events from the destination cluster. To avoid rebalances when
+someone added a topic matching the topic inclusion filter, Uber decided to maintain
+a list of exact topic names to mirror instead of using a regular expression filter. But
+this was hard to maintain as all MirrorMaker instances had to be reconfigured and
+bounced to add a new topic. If not done correctly, this could result in endless rebalan‐
+ces as the consumers won’t be able to agree on the topics they subscribe to.
+Other Cross-Cluster Mirroring Solutions | 259
+
+=== PAGE 289 ===
+Given these issues, Uber decided to write its own MirrorMaker clone, called
+uReplicator. Uber decided to use Apache Helix as a central (but highly available)
+controller to manage the topic list and the partitions assigned to each uReplicator
+instance. Administrators use a REST API to add new topics to the list in Helix, and
+uReplicator is responsible for assigning partitions to the different consumers. To ach‐
+ieve this, Uber replaced the Kafka consumers used in MirrorMaker with a Kafka con‐

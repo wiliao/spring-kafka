@@ -1,0 +1,200 @@
+lifecycle, creating, configuring, and closing,
+115-117
+metadata management and topic creation,
+148
+overview, 114-115
+additional notes, 115
+asynchronous and eventually consistent
+API, 114
+flat hierarchy, 115
+Options, 114
+topic management with, 118-121
+administering Kafka, 305-337
+authorizing admin operations, 305
+consumer groups, 312-315
+dynamic configuration changes, 315-320
+other tools, 334
+partition management, 326-334
+producing and consuming, 320-326
+topic operations, 305-312
+unsafe operations, 335-337
+433
+
+=== PAGE 463 ===
+aggregation and/or joins in stream processing,
+187
+aggregations, 393
+agility in data pipelines, 209
+alerting
+metrics for, 341
+on lack of metrics from broker, 343
+under-replicated partitions alerting trap,
+349
+using SLOs in, 345
+aliases (DNS), 116
+all topics bytes in rate, 357
+all topics bytes out rate, 358
+Allow ACLs, 296
+allow.everyone.if.no.acl.found configuration,
+295
+AlterConfigResult object, 132
+alterPartitionReassignments method, 129
+Amazon Web Services (AWS)
+cloud services for Kafka, 16
+installing Kafka in, 36
+anonymous connections, 270
+Apache Avro, 15
+Apache Kafka (see Kafka)
+Apache Kafka MirrorMaker (see MirrorMaker)
+Apache ZooKeeper (see ZooKeeper)
+ApiVersionRequest, 149
+application health checks, 343
+applications
+reprocessing caused by crashes, 187
+reprocessing caused by zombie applications,
+188
+validating, 177
+with multiple instances or multiple produc‐
+ers, sending duplicate messages, 185
+asl.enabled.mechanisms parameter, 275
+asynchronous commits (offsets), 97
+combining with synchronous commits, 99
+at-least-once delivery, 205
+atomic mutlipartition writes, 188
+atomicity, 188
+auditability, 267
+auditing, 265, 298
+AuthenticateCallbackHandler, 280
+authentication, 265, 269-289
+for MirrorMaker, 252
+reauthentication, 286-287
+SASL, 208, 275-286
+delegation tokens, 285-286
+SASL/GSSAPI, 276-278
+SASL/OAUTHBEARER, 283-285
+SASL/PLAIN, 278-281
+SASL/SCRAM, 281-282
+SASL configuration for ZooKeeper, 299
+security updates without downtime, 288
+SSL, 270
+authorization, 208, 265, 291-298
+AclAuthorizer, 292-295
+customizing, 295-297
+principal associated with MirrorMaker, 252
+security considerations, 297
+for ZooKeeper, 301
+authorizer.class.name parameter, 291
+auto.commit.interval.ms, 91, 95, 174
+auto.create.topics.enable configuration, 27
+auto.leader.rebalance.enable configuration, 27,
+128
+auto.leader.rebalance.enable setting
+true default setting, 141
+auto.offset.reset parameter, 91, 125, 173
+automatic commit (offsets), 95
+automation, metrics consumed by, 342
+availability, 267
+allowing out of sync replicas to become
+leaders, 167
+considerations in determining number of
+replicas per topic, 165
+high availability in Kafka Streams, 415
+mirroring, use for high availability and dis‐
+aster recovery, 234
+Avro
+serializing with, 64
+using Avro deserialization with Kafka cus‐
+tomer, 109
+using Avro records with Kafka, 65-68
+AvroConverter, 212
+AvroSerializer, 106
+AWS (see Amazon Web Services)
+Azure
+cloud services for Kafka, 16
+Kafka on, 36
+B
+bandwidth, limited, in W ANs, 235
+batch processing, 384
+batch.size parameter, 59, 258
+batches, 5
+beginTransaction method, 199
+434 | Index
+
+=== PAGE 464 ===
+bootstrap.servers configuration (Connect
+workers), 212
+bootstrap.servers property (consumers), 84, 269
+bootstrap.servers property (producers), 50
+broker.id parameter, 25, 38
+broker.rack configuration, 166
+brokers, 8
+broker-consumer communication between
+clusters, 236
+clients setting upper and lower boundary on
+data returned, 146
+cluster membership, 135
+configuration, 24-33, 164-169
+general parameters, 25-27
+keeping replicas in sync, 168
+mimimum in- sync replicas, 168
+persisting messages to disk, 169
+replicaton factor, 165
+topic defaults, 27-33
+unclean leader election, 166
+configuration defaults, overriding, 318
+configuring broker-side buffers, 257
+configuring TLS for, 273
+configuring to authenticate to ZooKeeper
+using SASL with a JAAS configuration
+file, 300
+datacenter layout and, 43
+deciding how many for a cluster, 37
+failure of, 183
+health checks, 343
+installing, 23-24
+keeping open file handle to each partition
+segment, 153
+Kerberos principal in ZooKeeper, 300
+metrics, 346-370
+active controller count, 354
+all topics bytes in rate, 357
+all topics bytes out rate, 358
+all topics messages in, 359
+cluster-level problems, 350
+controller queue size, 355
+diagnosing cluster problems, 347
+host-level problems, 352
+JVM monitoring, 366-367
+leader count, 359
+logging, 369
+offline partitions count, 360
+partition count, 359
+request handler idle ratio, 355
+request metrics, 361
+topic and partition metrics, 364
+under-replicated partitions, 348
+moving topics onto, 327
+multiple, configuration for a cluster, 38
+per-broker consumer metrics, 375
+per-broker producer metrics, 372
+quotas for messages, 73
+registration with KRaft controller quorom,
+139
+retrieving passwords from third-party store,
+301
+SASL mechanisms supported, 275
+throttling client's requests, 74
+transaction coordinator, 198
+buffer.memory parameter, 59
+Burrow (consumer lag checker), 179, 377
+C
+CA (certificate authority), 270
+self-signed CA, 271
+callbacks
+for asynchronous send by producers, 53
+send method call with, 51
+canary, monitoring, 256
+certificate authority (CA), 270
+Chandy-Lamport snapshots, 198
+change data capture and Debezium Project, 220
+ChecksumMessageFormatter, 324

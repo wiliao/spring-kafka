@@ -1,0 +1,200 @@
+tory. But note that placing dependencies in the top-level path will not work.
+An alternative is to add the connectors and all their dependencies to the Kafka
+Connect classpath, but this is not recommended and can introduce errors if you
+use a connector that brings a dependency that conflicts with one of Kafka’s
+dependencies. The recommended approach is to use plugin.path configuration.
+key.converter and value.converter
+Connect can handle multiple data formats stored in Kafka.  The two configura‐
+tions set the converter for the key and value part of the message that will be
+stored in Kafka. The default is JSON format using the JSONConverter included in
+Apache Kafka. These configurations can also be set to AvroConverter, Protobuf
+Converter, or JscoSchemaConverter, which are part of the Confluent Schema
+Registry.
+Some converters include converter-specific configuration parameters. Y ou need
+to prefix these parameters with key.converter. or value.converter., depend‐
+ing on whether you want to apply them to the key or value converter. For
+example, JSON messages can include a schema or be schema-less. To support
+either, you can set key.converter.schemas.enable=true or false, respectively.
+The same configuration can be used for the value converter by setting
+value.converter.schemas.enable to true or false. Avro messages also
+212 | Chapter 9: Building Data Pipelines
+
+=== PAGE 242 ===
+contain a schema, but you need to configure the location of the Schema Registry
+using key.converter.schema.registry.url and value.converter.schema.
+registry.url.
+rest.host.name and rest.port
+Connectors are typically configured and monitored through the REST API of
+Kafka Connect. Y ou can configure the specific port for the REST API.
+Once the workers are up and you have a cluster, make sure it is up and running by
+checking the REST API:
+$ curl http://localhost:8083/
+{"version":"3.0.0-
+SNAPSHOT","commit":"fae0784ce32a448a","kafka_cluster_id":"pfkYIGZQSXm8Ryl-
+vACQHdg"}%
+Accessing the base REST URI should return the current version you are running. We
+are running a snapshot of Kafka 3.0.0 (prerelease). We can also check which connec‐
+tor plug-ins are available:
+$ curl http://localhost:8083/connector-plugins
+[
+  {
+    "class": "org.apache.kafka.connect.file.FileStreamSinkConnector",
+    "type": "sink",
+    "version": "3.0.0-SNAPSHOT"
+  },
+  {
+    "class": "org.apache.kafka.connect.file.FileStreamSourceConnector",
+    "type": "source",
+    "version": "3.0.0-SNAPSHOT"
+  },
+  {
+    "class": "org.apache.kafka.connect.mirror.MirrorCheckpointConnector",
+    "type": "source",
+    "version": "1"
+  },
+  {
+    "class": "org.apache.kafka.connect.mirror.MirrorHeartbeatConnector",
+    "type": "source",
+    "version": "1"
+  },
+  {
+    "class": "org.apache.kafka.connect.mirror.MirrorSourceConnector",
+    "type": "source",
+    "version": "1"
+  }
+]
+Kafka Connect | 213
+
+=== PAGE 243 ===
+We are running plain Apache Kafka, so the only available connector plug-ins are the
+file source, file sink, and the connectors that are part of MirrorMaker 2.0.
+Let’s see how to configure and use these example connectors, and then we’ll dive into
+more advanced examples that require setting up external data systems to connect to.
+Standalone Mode
+Take note that Kafka Connect also has a standalone mode. It is
+similar to distributed mode—you just run bin/connect-
+standalone.sh instead of bin/connect-distributed.sh. Y ou can
+also pass in a connector configuration file on the command line
+instead of through the REST API. In this mode, all the connectors
+and tasks run on the one standalone worker. It is used in cases
+where connectors and tasks need to run on a specific machine (e.g.,
+the syslog connector listens on a port, so you need to know which
+machines it is running on).
+Connector Example: File Source and File Sink
+This example will use the file connectors and JSON converter that are part of Apache
+Kafka. To follow along, make sure you have ZooKeeper and Kafka up and running.
+To start, let’s run a distributed Connect worker. In a real production environment,
+you’ll want at least two or three of these running to provide high availability. In this
+example, we’ll only start one:
+bin/connect-distributed.sh config/connect-distributed.properties &
+Now it’s time to start a file source. As an example, we will configure it to read the
+Kafka configuration file—basically piping Kafka’s configuration into a Kafka topic:
+echo '{"name":"load-kafka-config", "config":{"connector.class":
+"FileStreamSource","file":"config/server.properties","topic":
+"kafka-config-topic"}}' | curl -X POST -d @- http://localhost:8083/connectors
+-H "Content-Type: application/json"
+{
+  "name": "load-kafka-config",
+  "config": {
+    "connector.class": "FileStreamSource",
+    "file": "config/server.properties",
+    "topic": "kafka-config-topic",
+    "name": "load-kafka-config"
+  },
+  "tasks": [
+    {
+      "connector": "load-kafka-config",
+      "task": 0
+    }
+214 | Chapter 9: Building Data Pipelines
+
+=== PAGE 244 ===
+  ],
+  "type": "source"
+}
+To create a connector, we wrote a JSON that includes a connector name, load-kafka-
+config, and a connector configuration map, which includes the connector class, the
+file we want to load, and the topic we want to load the file into.
+Let’s use the Kafka Console consumer to check that we have loaded the configuration
+into a topic:
+gwen$ bin/kafka-console-consumer.sh --bootstrap-server=localhost:9092
+--topic kafka-config-topic --from-beginning
+If all went well, you should see something along the lines of:
+{"schema":{"type":"string","optional":false},"payload":"# Licensed to the 
+Apache Software Foundation (ASF) under one or more"}
+<more stuff here>
+{"schema":{"type":"string","optional":false},"pay-
+load":"############################# Server Basics 
+#############################"}
+{"schema":{"type":"string","optional":false},"payload":""}
+{"schema":{"type":"string","optional":false},"payload":"# The id of the broker. 
+This must be set to a unique integer for each broker."}
+{"schema":{"type":"string","optional":false},"payload":"broker.id=0"}
+{"schema":{"type":"string","optional":false},"payload":""}
+<more stuff here>
+This is literally the contents of the config/server.properties file, as it was converted to
+JSON line by line and placed in kafka-config-topic by our connector. Note that by
+default, the JSON converter places a schema in each record. In this specific case, the
+schema is very simple—there is only a single column, named payload of type string,
+and it contains a single line from the file for each record.
+Now let’s use the file sink converter to dump the contents of that topic into a file. The
+resulting file should be completely identical to the original server.properties file, as the
+JSON converter will convert the JSON records back into simple text lines:
+echo '{"name":"dump-kafka-config", "config":
+{"connector.class":"FileStreamSink","file":"copy-of-server-
+properties","topics":"kafka-config-topic"}}' | curl -X POST -d @- http://local-
+host:8083/connectors --header "content-Type:application/json"
+{"name":"dump-kafka-config","config":
+{"connector.class":"FileStreamSink","file":"copy-of-server-
+properties","topics":"kafka-config-topic","name":"dump-kafka-config"},"tasks":
+[]}
+Kafka Connect | 215
+
+=== PAGE 245 ===
+Note the changes from the source configuration: the class we are using is now File
+StreamSink rather than FileStreamSource. We still have a file property, but now it
+refers to the destination file rather than the source of the records, and instead of
+specifying a topic, you specify topics. Note the plurality—you can write multiple top‐
+ics into one file with the sink, while the source only allows writing into one topic.
+If all went well, you should have a file named copy-of-server-properties, which is com‐
+pletely identical to the config/server.properties we used to populate kafka-config-
+topic.
+To delete a connector, you can run:
+curl -X DELETE http://localhost:8083/connectors/dump-kafka-config
+This example uses FileStream connectors because they are simple
+and built into Kafka, allowing you to create your first pipeline
+without installing anything except Kafka. These should not be used
+for actual production pipelines, as they have many limitations and
+no reliability guarantees. There are several alternatives you can use
+if you want to ingest data from files: FilePulse Connector, FileSys‐
+tem Connector, or SpoolDir.
+Connector Example: MySQL to Elasticsearch
+Now that we have a simple example working, let’s do something more useful. Let’s
+take a MySQL table, stream it to a Kafka topic, and from there load it to Elasticsearch
+and index its content.
+We are running tests on a MacBook. To install MySQL and Elasticsearch, simply run:
+brew install mysql
+brew install elasticsearch
+The next step is to make sure you have the connectors. There are a few options:
+1. Download and install using Confluent Hub client.
+2. Download from the Confluent Hub website (or from any other website where the
+connector you are interested in is hosted).
+3. Build from source code. To do this, you’ll need to:
+a. Clone the connector source:
+git clone https://github.com/confluentinc/kafka-connect-elasticsearch
+b. Run mvn install -DskipTests to build the project.
+c. Repeat with the JDBC connector.
+216 | Chapter 9: Building Data Pipelines
+
+=== PAGE 246 ===
+Now we need to load these connectors. Create a directory, such as /opt/connectors
+and update config/connect-distributed.properties to include plugin.path=/opt/
+connectors.
+Then take the jars that were created under the target directory where you built each
+connector and copy each one, plus their dependencies, to the appropriate subdirecto‐
+ries of plugin.path:
+gwen$ mkdir /opt/connectors/jdbc
+gwen$ mkdir /opt/connectors/elastic
+gwen$ cp .../kafka-connect-jdbc/target/kafka-connect-jdbc-10.3.x-
+SNAPSHOT.jar /opt/connectors/jdbc
+gwen$ cp ../kafka-connect-elasticsearch/target/kafka-connect-

@@ -1,0 +1,200 @@
+    customer.put("id", nCustomers);
+    customer.put("name", name);
+    customer.put("email", email);
+    ProducerRecord<String, GenericRecord> data =
+        new ProducerRecord<>("customerContacts", name, customer);
+    producer.send(data);
+}
+We still use the same KafkaAvroSerializer.
+And we provide the URI of the same Schema Registry.
+But now we also need to provide the Avro schema, since it is not provided by an
+Avro-generated object.
+Our object type is an Avro GenericRecord, which we initialize with our schema
+and the data we want to write.
+Then the value of the ProducerRecord is simply a GenericRecord that contains
+our schema and data. The serializer will know how to get the schema from this
+record, store it in the Schema Registry, and serialize the object data.
+Partitions
+In previous examples, the ProducerRecord objects we created included a topic name,
+key, and value. Kafka messages are key-value pairs, and while it is possible to create a
+ProducerRecord with just a topic and a value, with the key set to null by default,
+most applications produce records with keys. Keys serve two goals: they are addi‐
+tional information that gets stored with the message, and they are typically also used
+to decide which one of the topic partitions the message will be written to (keys also
+play an important role in compacted topics—we’ll discuss those in Chapter 6 ). All
+messages with the same key will go to the same partition. This means that if a process
+is reading only a subset of the partitions in a topic (more on that in Chapter 4), all the
+records for a single key will be read by the same process. To create a key-value record,
+you simply create a ProducerRecord as follows:
+ProducerRecord<String, String> record =
+    new ProducerRecord<>("CustomerCountry", "Laboratory Equipment", "USA");
+68 | Chapter 3: Kafka Producers: Writing Messages to Kafka
+
+=== PAGE 98 ===
+When creating messages with a null key, you can simply leave the key out:
+ProducerRecord<String, String> record =
+    new ProducerRecord<>("CustomerCountry", "USA"); 
+Here, the key will simply be set to null.
+When the key is null and the default partitioner is used, the record will be sent to
+one of the available partitions of the topic at random. A round-robin algorithm will
+be used to balance the messages among the partitions. Starting in the Apache Kafka
+2.4 producer, the round-robin algorithm used in the default partitioner when han‐
+dling null keys is sticky. This means that it will fill a batch of messages sent to a single
+partition before switching to the next partition. This allows sending the same number
+of messages to Kafka in fewer requests, leading to lower latency and reduced CPU
+utilization on the broker.
+If a key exists and the default partitioner is used, Kafka will hash the key (using its
+own hash algorithm, so hash values will not change when Java is upgraded) and use
+the result to map the message to a specific partition. Since it is important that a key is
+always mapped to the same partition, we use all the partitions in the topic to calculate
+the mapping—not just the available partitions. This means that if a specific partition
+is unavailable when you write data to it, you might get an error. This is fairly rare, as
+you will see in Chapter 7 when we discuss Kafka’s replication and availability.
+In addition to the default partitioner, Apache Kafka clients also provide RoundRobin
+Partitioner and UniformStickyPartitioner. These provide random partition
+assignment and sticky random partition assignment even when messages have keys.
+These are useful when keys are important for the consuming application (for exam‐
+ple, there are ETL applications that use the key from Kafka records as the primary key
+when loading data from Kafka to a relational database), but the workload may be
+skewed, so a single key may have a disproportionately large workload. Using the
+UniformStickyPartitioner will result in an even distribution of workload across all
+partitions.
+When the default partitioner is used, the mapping of keys to partitions is consistent 
+only as long as the number of partitions in a topic does not change. So as long as the
+number of partitions is constant, you can be sure that, for example, records regarding
+user 045189 will always get written to partition 34. This allows all kinds of optimiza‐
+tion when reading data from partitions. However, the moment you add new parti‐
+tions to the topic, this is no longer guaranteed—the old records will stay in partition
+34 while new records may get written to a different partition. When partitioning keys
+is important, the easiest solution is to create topics with sufficient partitions (the
+Confluent blog contains suggestions on how to choose the number of partitions) and
+never add partitions.
+Partitions | 69
+
+=== PAGE 99 ===
+Implementing a custom partitioning strategy
+So far, we have discussed the traits of the default partitioner, which is the one most
+commonly used. However, Kafka does not limit you to just hash partitions, and
+sometimes there are good reasons to partition data differently. For example, suppose
+that you are a B2B vendor and your biggest customer is a company that manufactures
+handheld devices called Bananas. Suppose that you do so much business with cus‐
+tomer “Banana” that over 10% of your daily transactions are with this customer. If
+you use default hash partitioning, the Banana records will get allocated to the same
+partition as other accounts, resulting in one partition being much larger than the rest.
+This can cause servers to run out of space, processing to slow down, etc. What we
+really want is to give Banana its own partition and then use hash partitioning to map
+the rest of the accounts to all other partitions.
+Here is an example of a custom partitioner:
+import org.apache.kafka.clients.producer.Partitioner;
+import org.apache.kafka.common.Cluster;
+import org.apache.kafka.common.PartitionInfo;
+import org.apache.kafka.common.record.InvalidRecordException;
+import org.apache.kafka.common.utils.Utils;
+public class BananaPartitioner implements Partitioner {
+    public void configure(Map<String, ?> configs) {} 
+    public int partition(String topic, Object key, byte[] keyBytes,
+                         Object value, byte[] valueBytes,
+                         Cluster cluster) {
+        List<PartitionInfo> partitions = cluster.partitionsForTopic(topic);
+        int numPartitions = partitions.size();
+        if ((keyBytes == null) || (!(key instanceOf String))) 
+            throw new InvalidRecordException("We expect all messages " +
+                "to have customer name as key");
+        if (((String) key).equals("Banana"))
+            return numPartitions - 1; // Banana will always go to last partition
+        // Other records will get hashed to the rest of the partitions
+        return Math.abs(Utils.murmur2(keyBytes)) % (numPartitions - 1);
+    }
+    public void close() {}
+}
+Partitioner interface includes configure, partition, and close methods. Here
+we only implement partition, although we really should have passed the special
+customer name through configure instead of hardcoding it in partition.
+70 | Chapter 3: Kafka Producers: Writing Messages to Kafka
+
+=== PAGE 100 ===
+We only expect String keys, so we throw an exception if that is not the case.
+Headers
+Records can, in addition to key and value, also include headers.  Record headers give
+you the ability to add some metadata about the Kafka record, without adding any
+extra information to the key/value pair of the record itself. Headers are often used for
+lineage to indicate the source of the data in the record, and for routing or tracing
+messages based on header information without having to parse the message itself
+(perhaps the message is encrypted and the router doesn’t have permissions to access
+the data).
+Headers are implemented as an ordered collection of key/value pairs.  The keys are
+always a String, and the values can be any serialized object—just like the message
+value.
+Here is a small example that shows how to add headers to a ProduceRecord:
+ProducerRecord<String, String> record =
+    new ProducerRecord<>("CustomerCountry", "Precision Products", "France");
+record.headers().add("privacy-level","YOLO".getBytes(StandardCharsets.UTF_8));
+Interceptors
+There are times when you want to modify the behavior of your Kafka client applica‐
+tion without modifying its code, perhaps because you want to add identical behavior
+to all applications in the organization. Or perhaps you don’t have access to the origi‐
+nal code.
+Kafka’s ProducerInterceptor interceptor includes two key methods:
+ProducerRecord<K, V> onSend(ProducerRecord<K, V> record)
+This method will be called before the produced record is sent to Kafka, indeed
+before it is even serialized. When overriding this method, you can capture infor‐
+mation about the sent record and even modify it. Just be sure to return a valid
+ProducerRecord from this method. The record that this method returns will be
+serialized and sent to Kafka.
+void onAcknowledgement(RecordMetadata metadata, Exception exception)
+This method will be called if and when Kafka responds with an acknowledgment
+for a send. The method does not allow modifying the response from Kafka, but
+you can capture information about the response.
+Headers | 71
+
+=== PAGE 101 ===
+Common use cases for producer interceptors include capturing monitoring and trac‐
+ing information; enhancing the message with standard headers, especially for lineage
+tracking purposes; and redacting sensitive information.
+Here is an example of a very simple producer interceptor. This one simply counts the
+messages sent and acks received within specific time windows:
+public class CountingProducerInterceptor implements ProducerInterceptor {
+  ScheduledExecutorService executorService =
+          Executors.newSingleThreadScheduledExecutor();
+  static AtomicLong numSent = new AtomicLong(0);
+  static AtomicLong numAcked = new AtomicLong(0);
+  public void configure(Map<String, ?> map) {
+      Long windowSize = Long.valueOf(
+              (String) map.get("counting.interceptor.window.size.ms")); 
+      executorService.scheduleAtFixedRate(CountingProducerInterceptor::run,
+              windowSize, windowSize, TimeUnit.MILLISECONDS);
+  }
+  public ProducerRecord onSend(ProducerRecord producerRecord) {
+      numSent.incrementAndGet();
+      return producerRecord; 
+  }
+  public void onAcknowledgement(RecordMetadata recordMetadata, Exception e) {
+      numAcked.incrementAndGet(); 
+  }
+  public void close() {
+      executorService.shutdownNow(); 
+  }
+  public static void run() {
+      System.out.println(numSent.getAndSet(0));
+      System.out.println(numAcked.getAndSet(0));
+  }
+}
+ProducerInterceptor is a Configurable interface. Y ou can override the
+configure method and setup before any other method is called. This method
+receives the entire producer configuration, and you can access any configuration
+parameter. In this case, we added a configuration of our own that we reference
+here.
+When a record is sent, we increment the record count and return the record
+without modifying it.
+72 | Chapter 3: Kafka Producers: Writing Messages to Kafka
+
+=== PAGE 102 ===
+When Kafka responds with an ack, we increment the acknowledgment count and
+don’t need to return anything.
+This method is called when the producer closes, giving us a chance to clean up
+the interceptor state. In this case, we close the thread we created. If you opened
+file handles, connections to remote data stores, or similar, this is the place to
+close everything and avoid leaks.
+As we mentioned earlier, producer interceptors can be applied without any changes
+to the client code. To use the preceding interceptor with kafka-console-producer,
+an example application that ships with Apache Kafka, follow these three simple steps:

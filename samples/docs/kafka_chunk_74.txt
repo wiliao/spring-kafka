@@ -1,0 +1,200 @@
+Monitor) does. This tool, open sourced by the Kafka team at LinkedIn, continually
+produces and consumes data from a topic that is spread across all brokers in a cluster.
+It measures the availability of both produce and consume requests on each broker, as
+well as the total produce to consume latency. This type of monitoring is invaluable to
+be able to externally verify that the Kafka cluster is operating as intended, since just
+like consumer lag monitoring, the Kafka broker cannot report whether or not clients
+are able to use the cluster properly.
+Summary
+Monitoring is a key aspect of running Apache Kafka properly, which explains why so
+many teams spend a significant amount of their time perfecting that part of opera‐
+tions. Many organizations use Kafka to handle petabyte-scale data flows. Assuring
+that the data does not stop, and that messages are not lost, this is a critical business
+requirement. It is also our responsibility to assist users with monitoring how their
+applications use Kafka by providing the metrics that they need to do this.
+378 | Chapter 13: Monitoring Kafka
+
+=== PAGE 408 ===
+In this chapter we covered the basics of how to monitor Java applications, and specifi‐
+cally the Kafka applications. We reviewed a subset of the numerous metrics available
+in the Kafka broker, also touching on Java and OS monitoring, as well as logging. We
+then detailed the monitoring available in the Kafka client libraries, including quota
+monitoring. Finally, we discussed the use of external monitoring systems for con‐
+sumer lag monitoring and end-to-end cluster availability. While certainly not an
+exhaustive list of the metrics that are available, this chapter reviewed the most critical
+ones to keep an eye on.
+Summary | 379
+
+=== PAGE 410 ===
+CHAPTER 14
+Stream Processing
+Kafka was traditionally seen as a powerful message bus, capable of delivering streams
+of events but without processing or transformation capabilities. Kafka’s reliable
+stream delivery capabilities make it a perfect source of data for stream processing sys‐
+tems. Apache Storm, Apache Spark Streaming, Apache Flink, Apache Samza, and
+many more stream processing systems were built with Kafka often being their only
+reliable data source.
+With the increased popularity of Apache Kafka, first as a simple message bus and
+later as a data integration system, many companies had a system containing many
+streams of interesting data, stored for long amounts of time and perfectly ordered,
+just waiting for some stream processing framework to show up and process them. In
+other words, in the same way that data processing was significantly more difficult
+before databases were invented, stream processing was held back by the lack of a
+stream processing platform.
+Starting from version 0.10.0, Kafka does more than provide a reliable source of data
+streams to every popular stream processing framework. Now Kafka includes a power‐
+ful stream processing library as part of its collection of client libraries, called Kafka
+Streams (or sometimes Streams API). This allows developers to consume, process,
+and produce events in their own apps, without relying on an external processing
+framework.
+We’ll begin the chapter by explaining what we mean by stream processing (since this
+term is frequently misunderstood), then discuss some of the basic concepts of stream
+processing and the design patterns that are common to all stream processing systems.
+We’ll then dive into Apache Kafka’s stream processing library—its goals and architec‐
+ture. We’ll give a small example of how to use Kafka Streams to calculate a moving
+average of stock prices. We’ll then discuss other examples of good stream processing
+381
+
+=== PAGE 411 ===
+use cases and finish off the chapter by providing a few criteria you can use when
+choosing which stream processing framework (if any) to use with Apache Kafka.
+This chapter is intended as just a quick introduction to the large and fascinating
+world of stream processing and Kafka Streams. There are entire books written on
+these subjects.
+Some books cover the basic concepts of stream processing from a data architecture
+perspective:
+• Making Sense of Stream Processing by Martin Kleppmann (O’Reilly) discusses the
+benefits of rethinking applications as stream processing applications and how to
+reorient data architectures around the idea of event streams.
+• Streaming Systems by Tyler Akidau, Slava Chernyak, and Reuven Lax (O’Reilly) is
+a great general introduction to the topic of stream processing and some of the
+basic ideas in the space.
+• Flow Architectures by James Urquhart (O’Reilly) is targeted at CTOs and dis‐
+cusses the implications of stream processing to the business.
+Other books go into specific details of specific frameworks:
+• Mastering Kafka Streams and ksqlDB by Mitch Seymour (O’Reilly)
+• Kafka Streams in Action by William P . Bejeck Jr. (Manning)
+• Event Streaming with Kafka Streams and ksqlDB  by William P . Bejeck Jr.
+(Manning)
+• Stream Processing with Apache Flink  by Fabian Hueske and Vasiliki Kalavri
+(O’Reilly)
+• Stream Processing with Apache Spark  by Gerard Maas and Francois Garillot
+(O’Reilly)
+Finally, Kafka Streams is still an evolving framework. Every major release deprecates
+APIs and modifies semantics. This chapter documents APIs and semantics as of
+Apache Kafka 2.8. We avoided using any API that was planned for deprecation in
+release 3.0, but our discussion of join semantics and timestamp handling does not
+include any of the changes planned for release 3.0.
+What Is Stream Processing?
+There is a lot of confusion about what stream processing means.  Many definitions
+mix up implementation details, performance requirements, data models, and many
+other aspects of software engineering. A similar thing has happened in the world of
+relational databases—the abstract definitions of the relational model are getting
+382 | Chapter 14: Stream Processing
+
+=== PAGE 412 ===
+forever entangled in the implementation details and specific limitations of the popu‐
+lar database engines.
+The world of stream processing is still evolving, and just because a specific popular
+implementation does things in specific ways or has specific limitations doesn’t mean
+that those details are an inherent part of processing streams of data.
+Let’s start at the beginning: What is a data stream (also called an event stream or
+streaming data)? First and foremost, a data stream is an abstraction representing an
+unbounded dataset. Unbounded means infinite and ever growing. The dataset is
+unbounded because over time, new records keep arriving. This definition is used by
+Google, Amazon, and pretty much everyone else.
+Note that this simple model (a stream of events) can be used to represent just about
+every business activity we care to analyze. We can look at a stream of credit card
+transactions, stock trades, package deliveries, network events going through a switch,
+events reported by sensors in manufacturing equipment, emails sent, moves in a
+game, etc. The list of examples is endless because pretty much everything can be seen
+as a sequence of events.
+There are a few other attributes of the event streams model, in addition to its
+unbounded nature:
+Event streams are ordered
+There is an inherent notion of which events occur before or after other events.
+This is clearest when looking at financial events. A sequence in which you first
+put money in your account and later spend the money is very different from a
+sequence at which you first spend the money and later cover your debt by depos‐
+iting money back. The latter will incur overdraft charges, while the former will
+not. Note that this is one of the differences between an event stream and a data‐
+base table—records in a table are always considered unordered, and the “order
+by” clause of SQL is not part of the relational model; it was added to assist in
+reporting.
+Immutable data records
+Events, once occurred, can never be modified. A financial transaction that is can‐
+celed does not disappear. Instead, an additional event is written to the stream,
+recording a cancelation of a previous transaction. When a customer returns
+merchandise to a shop, we don’t delete the fact that the merchandise was sold to
+them earlier, rather we record the return as an additional event. This is another
+difference between a data stream and a database table—we can delete or update
+records in a table, but those are all additional transactions that occur in the data‐
+base, and as such can be recorded in a stream of events that records all transac‐
+tions. If you are familiar with binlogs, W ALs, or redo logs in databases, you can
+see that if we insert a record into a table and later delete it, the table will no
+What Is Stream Processing? | 383
+
+=== PAGE 413 ===
+longer contain the record, but the redo log will contain two transactions—the
+insert and the delete.
+Event streams are replayable
+This is a desirable property. While it is easy to imagine nonreplayable streams
+(TCP packets streaming through a socket are generally nonreplayable), for most
+business applications, it is critical to be able to replay a raw stream of events that
+occurred months (and sometimes years) earlier. This is required to correct errors,
+try new methods of analysis, or perform audits. This is the reason we believe
+Kafka made stream processing so successful in modern businesses—it allows
+capturing and replaying a stream of events. Without this capability, stream pro‐
+cessing would not be more than a lab toy for data scientists.
+It is worth noting that neither the definition of event streams nor the attributes we
+later listed say anything about the data contained in the events or the number of
+events per second. The data differs from system to system—events can be tiny (some‐
+times only a few bytes) or very large (XML messages with many headers); they can
+also be completely unstructured key-value pairs, semi-structured JSON, or structured
+Avro or Protobuf messages. While it is often assumed that data streams are “big data”
+and involve millions of events per second, the same techniques we’ll discuss apply
+equally well (and often better) to smaller streams of events with only a few events per
+second or minute.
+Now that we know what event streams are, it’s time to make sure we understand
+stream processing. Stream processing refers to the ongoing processing of one or more
+event streams. Stream processing is a programming paradigm—just like request-
+response and batch processing. Let’s look at how different programming paradigms
+compare to get a better understanding of how stream processing fits into software
+architectures:
+Request-response
+This is the lowest-latency paradigm, with response times ranging from submilli‐
+seconds to a few milliseconds, usually with the expectation that response times
+will be highly consistent. The mode of processing is usually blocking—an
+app sends a request and waits for the processing system to respond. In the data‐
+base world, this paradigm is known as online transaction processing  (OLTP). 
+Point-of-sale systems, credit card processing, and time-tracking systems typically
+work in this paradigm.
+Batch processing
+This is the high-latency/high-throughput option. The processing system wakes
+up at set times—every day at 2:00 a.m., every hour on the hour, etc. It reads all
+required input (either all data available since the last execution, all data from the
+beginning of month, etc.), writes all required output, and goes away until the
+next time it is scheduled to run. Processing times range from minutes to hours,
+384 | Chapter 14: Stream Processing
+
+=== PAGE 414 ===
+and users expect to read stale data when they are looking at results. In the data‐
+base world, these are the data warehouse and business intelligence systems—data
+is loaded in huge batches once a day, reports are generated, and users look at the
+same reports until the next data load occurs. This paradigm often has great effi‐
+ciency and economy of scale, but in recent years, businesses need the data avail‐
+able in shorter timeframes in order to make decision-making more timely and
+efficient. This puts huge pressure on systems that were written to exploit econ‐
+omy of scale—not to provide low-latency reporting.
+Stream processing
+This is a continuous and nonblocking option. Stream processing fills the gap
+between the request-response world, where we wait for events that take two
+milliseconds to process, and the batch processing world, where data is processed
+once a day and takes eight hours to complete. Most business processes don’t
+require an immediate response within milliseconds but can’t wait for the next day
+either. Most business processes happen continuously, and as long as the business
+reports are updated continuously and the line of business apps can continuously
+respond, the processing can proceed without anyone waiting for a specific
+response within milliseconds. Business processes such as alerting on suspicious
+credit transactions or network activity, adjusting prices in real-time based on
+supply and demand, or tracking deliveries of packages are all a natural fit for

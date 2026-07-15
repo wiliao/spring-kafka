@@ -1,0 +1,200 @@
+By default, unclean.leader.election.enable is set to false, which will not allow
+out-of-sync replicas to become leaders. This is the safest option since it provides the
+best guarantees against data loss. It does mean that in the extreme unavailability sce‐
+narios that we described previously, some partitions will remain unavailable until
+manually recovered. It is always possible for an administrator to look at the situation,
+decide to accept the data loss in order to make the partitions available, and switch this
+configuration to true before starting the cluster. Just don’t forget to turn it back to
+false after the cluster recovered.
+Minimum In-Sync Replicas
+Both the topic and the broker-level configuration are called min.insync.replicas.
+Broker Configuration | 167
+
+=== PAGE 197 ===
+As we’ve seen, there are cases where even though we configured a topic to have three
+replicas, we may be left with a single in-sync replica. If this replica becomes unavail‐
+able, we may have to choose between availability and consistency. This is never an
+easy choice. Note that part of the problem is that, per Kafka reliability guarantees,
+data is considered committed when it is written to all in-sync replicas, even when all
+means just one replica and the data could be lost if that replica is unavailable.
+When we want to be sure that committed data is written to more than one replica, we
+need to set the minimum number of in-sync replicas to a higher value. If a topic has
+three replicas and we set min.insync.replicas to 2, then producers can only write to
+a partition in the topic if at least two out of the three replicas are in sync.
+When all three replicas are in sync, everything proceeds normally. This is also true if
+one of the replicas becomes unavailable. However, if two out of three replicas are not
+available, the brokers will no longer accept produce requests. Instead, producers that
+attempt to send data will receive NotEnoughReplicasException. Consumers can con‐
+tinue reading existing data. In effect, with this configuration, a single in-sync replica
+becomes read-only. This prevents the undesirable situation where data is produced
+and consumed, only to disappear when unclean election occurs. In order to recover
+from this read-only situation, we must make one of the two unavailable partitions
+available again (maybe restart the broker) and wait for it to catch up and get in sync.
+Keeping Replicas In Sync
+As mentioned earlier, out-of-sync replicas decrease the overall reliability, so it is
+important to avoid these as much as possible. We also explained that a replica can
+become out of sync in one of two ways: either it loses connectivity to ZooKeeper or it
+fails to keep up with the leader and builds up a replication lag. Kafka has two broker
+configurations that control the sensitivity of the cluster to these two conditions.
+zookeeper.session.timeout.ms is the time interval during which a Kafka broker
+can stop sending heartbeats to ZooKeeper without ZooKeeper considering the broker
+dead and removing it from the cluster. In version 2.5.0, this value was increased from
+6 seconds to 18 seconds, in order to increase the stability of Kafka clusters in cloud
+environments where network latencies show higher variance. In general, we want this
+time to be high enough to avoid random flapping caused by garbage collection or
+network conditions, but still low enough to make sure brokers that are actually frozen
+will be detected in a timely manner.
+If a replica did not fetch from the leader or did not catch up to the latest messages on
+the leader for longer than replica.lag.time.max.ms, it will become out of sync. This
+was increased from 10 seconds to 30 seconds in release 2.5.0 to improve resilience of
+the cluster and avoid unnecessary flapping. Note that this higher value also impacts
+maximum latency for the consumer—with the higher value it can take up to 30
+168 | Chapter 7: Reliable Data Delivery
+
+=== PAGE 198 ===
+seconds until a message arrives to all replicas and the consumers are allowed to con‐
+sume it.
+Persisting to Disk
+We’ve mentioned a few times that Kafka will acknowledge messages that were not
+persisted to disk, depending just on the number of replicas that received the message. 
+Kafka will flush messages to disk when rotating segments (by default 1 GB in size)
+and before restarts but will otherwise rely on Linux page cache to flush messages
+when it becomes full. The idea behind this is that having three machines in separate
+racks or availability zones, each with a copy of the data, is safer than writing the mes‐
+sages to disk on the leader, because simultaneous failures on two different racks or
+zones are so unlikely. However, it is possible to configure the brokers to persist mes‐
+sages to disk more frequently. The configuration parameter flush.messages allows
+us to control the maximum number of messages not synced to disk, and flush.ms
+allows us to control the frequency of syncing to disk. Before using this feature, it is
+worth reading how fsync impacts Kafka’s throughput and how to mitigate its
+drawbacks.
+Using Producers in a Reliable System
+Even if we configure the brokers in the most reliable configuration possible, the sys‐
+tem as a whole can still potentially lose data if we don’t configure the producers to be
+reliable as well.
+Here are two example scenarios to demonstrate this:
+• We configured the brokers with three replicas, and unclean leader election is dis‐
+abled. So we should never lose a single message that was committed to the Kafka
+cluster. However, we configured the producer to send messages with acks=1. We
+sent a message from the producer, and it was written to the leader but not yet to
+the in-sync replicas. The leader sent back a response to the producer saying,
+“Message was written successfully” and immediately crashes before the data was
+replicated to the other replicas. The other replicas are still considered in sync
+(remember that it takes a while before we declare a replica out of sync), and one
+of them will become the leader. Since the message was not written to the replicas,
+it was lost. But the producing application thinks it was written successfully. The
+system is consistent because no consumer saw the message (it was never commit‐
+ted because the replicas never got it), but from the producer perspective, a mes‐
+sage was lost.
+• We configured the brokers with three replicas, and unclean leader election is dis‐
+abled. We learned from our mistakes and started producing messages with
+acks=all. Suppose that we are attempting to write a message to Kafka, but the
+Using Producers in a Reliable System | 169
+
+=== PAGE 199 ===
+leader for the partition we are writing to just crashed and a new one is still get‐
+ting elected. Kafka will respond with “Leader not Available. ” At this point, if the
+producer doesn’t handle the error correctly and doesn’t retry until the write is
+successful, the message may be lost. Once again, this is not a broker reliability
+issue because the broker never got the message; and it is not a consistency issue
+because the consumers never got the message either. But if producers don’t han‐
+dle errors correctly, they may cause message loss.
+As the examples show, there are two important things that everyone who writes appli‐
+cations that produce to Kafka must pay attention to:
+• Use the correct acks configuration to match reliability requirements
+• Handle errors correctly both in configuration and in code
+We discussed producer configuration in depth in Chapter 3 , but let’s go over the
+important points again.
+Send Acknowledgments
+Producers can choose between three different acknowledgment modes:
+acks=0
+This means that a message is considered to be written successfully to Kafka if the
+producer managed to send it over the network. We will still get errors if the
+object we are sending cannot be serialized or if the network card failed, but we
+won’t get any error if the partition is offline, a leader election is in progress, or
+even if the entire Kafka cluster is unavailable. Running with acks=0 has low pro‐
+duce latency (which is why we see a lot of benchmarks with this configuration),
+but it will not improve end-to-end latency (remember that consumers will not
+see messages until they are replicated to all available replicas).
+acks=1
+This means that the leader will send either an acknowledgment or an error the
+moment it gets the message and writes it to the partition data file (but not neces‐
+sarily synced to disk). We can lose data if the leader shuts down or crashes and
+some messages that were successfully written to the leader and acknowledged
+were not replicated to the followers before the crash. With this configuration, it is
+also possible to write to the leader faster than it can replicate messages and end
+up with under-replicated partitions, since the leader will acknowledge messages
+from the producer before replicating them.
+acks=all
+This means that the leader will wait until all in-sync replicas get the message
+before sending back an acknowledgment or an error. In conjunction with the
+170 | Chapter 7: Reliable Data Delivery
+
+=== PAGE 200 ===
+min.insync.replicas configuration on the broker, this lets us control how many
+replicas get the message before it is acknowledged. This is the safest option—the
+producer won’t stop trying to send the message before it is fully committed. This
+is also the option with the longest producer latency—the producer waits for all
+in-sync replicas to get all the messages before it can mark the message batch as
+“done” and carry on.
+Configuring Producer Retries
+There are two parts to handling errors in the producer: the errors that the producers
+handle automatically for us and the errors that we, as developers using the producer
+library, must handle.
+The producer can handle retriable errors. When the producer sends messages to a
+broker, the broker can return either a success or an error code. Those error codes
+belong to two categories—errors that can be resolved after retrying and errors that
+won’t be resolved. For example, if the broker returns the error code
+LEADER_NOT_AVAILABLE, the producer can try sending the message again—maybe a
+new broker was elected and the second attempt will succeed. This means that
+LEADER_NOT_AVAILABLE is a retriable error. On the other hand, if a broker returns an
+INVALID_CONFIG exception, trying the same message again will not change the con‐
+figuration. This is an example of a nonretriable error.
+In general, when our goal is to never lose a message, our best approach is to configure
+the producer to keep trying to send the messages when it encounters a retriable error.
+And the best approach to retries, as recommended in Chapter 3, is to leave the num‐
+ber of retries at its current default ( MAX_INT, or effectively infinite) and use
+delivery.timout.ms to configure the maximum amount of time we are willing to
+wait until giving up on sending a message—the producer will retry sending the mes‐
+sage as many times as possible within this time interval.
+Retrying to send a failed message includes a risk that both messages were successfully
+written to the broker, leading to duplicates. Retries and careful error handling can
+guarantee that each message will be stored at least once , but not exactly once. Using
+enable.idempotence=true will cause the producer to include additional information
+in its records, which brokers will use to skip duplicate messages caused by retries. In
+Chapter 8, we discuss in detail how and when this works.
+Additional Error Handling
+Using the built-in producer retries is an easy way to correctly handle a large variety of
+errors without loss of messages, but as developers, we must still be able to handle
+other types of errors. These include:
+Using Producers in a Reliable System | 171
+
+=== PAGE 201 ===
+• Nonretriable broker errors, such as errors regarding message size, authorization
+errors, etc.
+• Errors that occur before the message was sent to the broker—for example, seriali‐
+zation errors
+• Errors that occur when the producer exhausted all retry attempts or when the
+available memory used by the producer is filled to the limit due to using all of it
+to store messages while retrying
+• Timeouts
+In Chapter 3  we discussed how to write error handlers for both sync and async
+message-sending methods. The content of these error handlers is specific to the appli‐
+cation and its goals—do we throw away “bad messages”? Log errors? Stop reading
+messages from the source system? Apply back pressure to the source system to stop
+sending messages for a while? Store these messages in a directory on the local disk?
+These decisions depend on the architecture and the product requirements. Just note
+that if all the error handler is doing is retrying to send the message, then we’ll be bet‐
+ter off relying on the producer’s retry functionality.
+Using Consumers in a Reliable System
+Now that we have learned how to produce data while taking Kafka’s reliability guar‐
+antees into account, it is time to see how to consume data.
+As we saw in the first part of this chapter, data is only available to consumers after it
+has been committed to Kafka—meaning it was written to all in-sync replicas. This
+means that consumers get data that is guaranteed to be consistent. The only thing
+consumers are left to do is make sure they keep track of which messages they’ve read
+and which messages they haven’t. This is key to not losing messages while consuming
+them.
+When reading data from a partition, a consumer is fetching a batch of messages,
+checking the last offset in the batch, and then requesting another batch of messages
+starting from the last offset received. This guarantees that a Kafka consumer will

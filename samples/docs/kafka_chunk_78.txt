@@ -1,0 +1,200 @@
+be used in a group-by operation.
+We filter out the word the, just to show how easy filtering is.
+And we group by key, so we now have a collection of events for each unique
+word.
+We count how many events we have in each collection. The result of counting is a
+Long data type. We convert it to a String so it will be easier for humans to read
+the results.
+Only one thing left—write the results back to Kafka.
+Now that we have defined the flow of transformations that our application will run,
+we just need to…run it:
+KafkaStreams streams = new KafkaStreams(builder.build(), props); 
+streams.start(); 
+// usually the stream application would be running forever,
+// in this example we just let it run for some time and stop
+Thread.sleep(5000L);
+streams.close(); 
+Define a KafkaStreams object based on our topology and the properties we
+defined.
+Start Kafka Streams.
+After a while, stop it.
+That’s it! In just a few short lines, we demonstrated how easy it is to implement a sin‐
+gle event processing pattern (we applied a map and a filter on the events). We reparti‐
+tioned the data by adding a group-by operator and then maintained simple local state
+when we counted the number of records that have each word as a key. Then we main‐
+tained simple local state when we counted the number of times each word appeared.
+At this point, we recommend running the full example. The README in the GitHub
+repository contains instructions on how to run the example.
+Note that we can run the entire example on our machine without installing anything
+except Apache Kafka. If our input topic contains multiple partitions, we can run
+404 | Chapter 14: Stream Processing
+
+=== PAGE 434 ===
+multiple instances of the WordCount application (just run the app in several different
+terminal tabs), and we have our first Kafka Streams processing cluster. The instances
+of the WordCount application talk to one another and coordinate the work. One of the
+biggest barriers to entry for some stream processing frameworks is that local mode is
+very easy to use, but then to run a production cluster, we need to install YARN or
+Mesos, then install the processing framework on all those machines, and then learn
+how to submit our app to the cluster. With the Kafka’s Streams API, we just start mul‐
+tiple instances of our app—and we have a cluster. The exact same app is running on
+our development machine and in production.
+Stock Market Statistics
+The next example is more involved—we will read a stream of stock market trading
+events that include the stock ticker, ask price, and ask size. In stock market trades, ask
+price is what a seller is asking for, whereas bid price is what the buyer is suggesting to
+pay. Ask size is the number of shares the seller is willing to sell at that price. For sim‐
+plicity of the example, we’ll ignore bids completely. We also won’t include a time‐
+stamp in our data; instead, we’ll rely on event time populated by our Kafka producer.
+We will then create output streams that contain a few windowed statistics:
+• Best (i.e., minimum) ask price for every five-second window
+• Number of trades for every five-second window
+• Average ask price for every five-second window
+All statistics will be updated every second.
+For simplicity, we’ll assume our exchange only has 10 stock tickers trading in it. The
+setup and configuration are very similar to those we used in “Word Count” on page
+402:
+Properties props = new Properties();
+props.put(StreamsConfig.APPLICATION_ID_CONFIG, "stockstat");
+props.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, Constants.BROKER);
+props.put(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG,
+  Serdes.String().getClass().getName());
+props.put(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG,
+  TradeSerde.class.getName());
+The main difference is the Serde classes used. In “Word Count” on page 402, we used
+strings for both key and value, and therefore used the Serdes.String() class as a
+serializer and deserializer for both. In this example, the key is still a string, but the
+value is a Trade object that contains the ticker symbol, ask price, and ask size. In
+order to serialize and deserialize this object (and a few other objects we used in this
+small app), we used the Gson library from Google to generate a JSON serializer and
+Kafka Streams by Example | 405
+
+=== PAGE 435 ===
+deserializer from our Java object. Then we created a small wrapper that created a
+Serde object from those. Here is how we created the Serde:
+static public final class TradeSerde extends WrapperSerde<Trade> {
+    public TradeSerde() {
+        super(new JsonSerializer<Trade>(),
+          new JsonDeserializer<Trade>(Trade.class));
+    }
+}
+Nothing fancy, but remember to provide a Serde object for every object you want to
+store in Kafka—input, output, and, in some cases, intermediate results. To make this
+easier, we recommend generating these Serdes through a library like Gson, Avro, Pro‐
+tobuf, or something similar.
+Now that we have everything configured, it’s time to build our topology:
+KStream<Windowed<String>, TradeStats> stats = source
+    .groupByKey() 
+    .windowedBy(TimeWindows.of(Duration.ofMillis(windowSize))
+                           .advanceBy(Duration.ofSeconds(1))) 
+    .aggregate( 
+        () -> new TradeStats(),
+        (k, v, tradestats) -> tradestats.add(v), 
+        Materialized.<String, TradeStats, WindowStore<Bytes, byte[]>>
+            as("trade-aggregates") 
+           .withValueSerde(new TradeStatsSerde())) 
+    .toStream() 
+    .mapValues((trade) -> trade.computeAvgPrice()); 
+stats.to("stockstats-output",
+    Produced.keySerde(
+      WindowedSerdes.timeWindowedSerdeFrom(String.class, windowSize))); 
+We start by reading events from the input topic and performing a groupByKey()
+operation. Despite its name, this operation does not do any grouping. Rather, it
+ensures that the stream of events is partitioned based on the record key. Since we
+wrote the data into a topic with a key and didn’t modify the key before calling
+groupByKey(), the data is still partitioned by its key—so this method does noth‐
+ing in this case.
+We define the window—in this case, a window of five seconds, advancing every
+second.
+After we ensure correct partitioning and windowing, we start the aggregation.
+The aggregate method will split the stream into overlapping windows (a five-
+second window every second) and then apply an aggregate method on all the
+events in the window. The first parameter this method takes is a new object that
+will contain the results of the aggregation— Tradestats, in our case. This is an
+406 | Chapter 14: Stream Processing
+
+=== PAGE 436 ===
+object we created to contain all the statistics we are interested in for each time
+window—minimum price, average price, and number of trades.
+We then supply a method for actually aggregating the records—in this case, an
+add method of the Tradestats object is used to update the minimum price, num‐
+ber of trades, and total prices in the window with the new record.
+As mentioned in “Stream Processing Design Patterns” on page 392, windowing
+aggregation requires maintaining a state and a local store in which the state will
+be maintained. The last parameter of the aggregate method is the configuration
+of the state store. Materialized is the store configuration object, and we config‐
+ure the store name as trade-aggregates. This can be any unique name.
+As part of the state store configuration, we also provide a Serde object for serial‐
+izing and deserializing the results of the aggregation (the Tradestats object).
+The results of the aggregation is a table with the ticker and the time window as
+the primary key and the aggregation result as the value. We are turning the table
+back into a stream of events.
+The last step is to update the average price—right now the aggregation results
+include the sum of prices and number of trades. We go over these records and
+use the existing statistics to calculate average price so we can include it in the out‐
+put stream.
+And finally, we write the results back to the stockstats-output stream. Since
+the results are part of a windowing operation, we create a WindowedSerde that
+stores the result in a windowed data format that includes the window timestamp.
+The window size is passed as part of the Serde, even though it isn’t used in the
+serialization (deserialization requires the window size, because only the start time
+of the window is stored in the output topic).
+After we define the flow, we use it to generate a KafkaStreams object and run it, just
+like we did in “Word Count” on page 402.
+This example shows how to perform windowed aggregation on a stream—probably
+the most popular use case of stream processing. One thing to notice is how little work
+was needed to maintain the local state of the aggregation—just provide a Serde and
+name the state store. Y et this application will scale to multiple instances and automat‐
+ically recover from a failure of each instance by shifting processing of some partitions
+to one of the surviving instances. We will see more on how it is done in “Kafka
+Streams: Architecture Overview” on page 410.
+Kafka Streams by Example | 407
+
+=== PAGE 437 ===
+As usual, you can find the complete example, including instructions for running it,
+on GitHub.
+ClickStream Enrichment
+The last example will demonstrate streaming joins by enriching a stream of clicks on
+a website. We will generate a stream of simulated clicks, a stream of updates to a fic‐
+tional profile database table, and a stream of web searches. We will then join all three
+streams to get a 360-degree view into each user activity. What did the users search
+for? What did they click as a result? Did they change their “interests” in their user
+profile? These kinds of joins provide a rich data collection for analytics. Product rec‐
+ommendations are often based on this kind of information—the user searched for
+bikes, clicked on links for “Trek, ” and is interested in travel, so we can advertise bikes
+from Trek, helmets, and bike tours to exotic locations like Nebraska.
+Since configuring the app is similar to the previous examples, let’s skip this part and
+take a look at the topology for joining multiple streams:
+KStream<Integer, PageView> views =
+    builder.stream(Constants.PAGE_VIEW_TOPIC,
+      Consumed.with(Serdes.Integer(), new PageViewSerde())); 
+KStream<Integer, Search> searches =
+    builder.stream(Constants.SEARCH_TOPIC,
+      Consumed.with(Serdes.Integer(), new SearchSerde()));
+KTable<Integer, UserProfile> profiles =
+    builder.table(Constants.USER_PROFILE_TOPIC,
+      Consumed.with(Serdes.Integer(), new ProfileSerde())); 
+KStream<Integer, UserActivity> viewsWithProfile = views.leftJoin(profiles, 
+                (page, profile) -> {
+                    if (profile != null)
+                        return new UserActivity(
+                          profile.getUserID(), profile.getUserName(),
+                          profile.getZipcode(), profile.getInterests(),
+                          "", page.getPage()); 
+                    else
+                       return new UserActivity(
+                         -1, "", "", null, "", page.getPage());
+                    });
+KStream<Integer, UserActivity> userActivityKStream =
+    viewsWithProfile.leftJoin(searches, 
+      (userActivity, search) -> {
+          if (search != null)
+              userActivity.updateSearch(search.getSearchTerms()); 
+          else
+              userActivity.updateSearch("");
+          return userActivity;
+      },
+408 | Chapter 14: Stream Processing
+
+=== PAGE 438 ===
+      JoinWindows.of(Duration.ofSeconds(1)).before(Duration.ofSeconds(0)),  

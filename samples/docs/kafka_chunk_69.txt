@@ -1,0 +1,200 @@
+segment (reducing the overall available memory). The same can happen with a CPU
+352 | Chapter 13: Monitoring Kafka
+
+=== PAGE 382 ===
+failure. For problems such as these, you should be using the facilities that your
+hardware provides, such as an intelligent platform management interface (IPMI) to
+monitor hardware health. When there’s an active problem, looking at the kernel ring
+buffer using dmesg will help you to see log messages that are getting thrown to the
+system console.
+The more common type of hardware failure that leads to a performance degradation
+in Kafka is a disk failure. Apache Kafka is dependent on the disk for persistence of
+messages, and producer performance is directly tied to how fast your disks commit
+those writes. Any deviation in this will show up as problems with the performance of
+the producers and the replica fetchers. The latter is what leads to under-replicated
+partitions. As such, it is important to monitor the health of the disks at all times and
+address any problems quickly.
+One Bad Egg
+A single disk failure on a single broker can destroy the perfor‐
+mance of an entire cluster. This is because the producer clients will
+connect to all brokers that lead partitions for a topic, and if you
+have followed best practices, those partitions will be evenly spread
+over the entire cluster. If one broker starts performing poorly and
+slowing down produce requests, this will cause back pressure in the
+producers, slowing down requests to all brokers.
+To begin with, make sure you are monitoring hardware status information for the
+disks from the IPMI, or the interface provided by your hardware. In addition, within
+the OS you should be running SMART (Self-Monitoring, Analysis and Reporting
+Technology) tools to both monitor and test the disks on a regular basis. This will alert
+you to a failure that is about to happen. It is also important to keep an eye on the disk
+controller, especially if it has RAID functionality, whether you are using hardware
+RAID or not. Many controllers have an onboard cache that is only used when the
+controller is healthy and the battery backup unit (BBU) is working. A failure of the
+BBU can result in the cache being disabled, degrading disk performance.
+Networking is another area where partial failures will cause problems. Some of these
+problems are hardware issues, such as a bad network cable or connector. Some are
+configuration issues, which is usually a change in the speed or duplex settings for the
+connection, either on the server side or upstream on the networking hardware. Net‐
+work configuration problems could also be OS issues, such as having the network
+buffers undersized or too many network connections taking up too much of the over‐
+all memory footprint. One of the key indicators of problems in this area will be the
+number of errors detected on the network interfaces. If the error count is increasing,
+there is probably an unaddressed issue.
+Kafka Broker Metrics | 353
+
+=== PAGE 383 ===
+If there are no hardware problems, another common problem to look for is another
+application running on the system that is consuming resources and putting pressure
+on the Kafka broker. This could be something that was installed in error, or it could
+be a process that is supposed to be running, such as a monitoring agent, but is having
+problems. Use the tools on your system, such as top, to identify if there is a process
+that is using more CPU or memory than expected.
+If the other options have been exhausted and you have not yet found the source of the
+discrepancy on the host, a configuration difference has likely crept in, either with the
+broker or the system itself. Given the number of applications that are running on any
+single server and the number of configuration options for each of them, it can be a
+daunting task to find a discrepancy. This is why it is crucial that you utilize a configu‐
+ration management system, such as Chef or Puppet, in order to maintain consistent
+configurations across your OSes and applications (including Kafka).
+Broker Metrics
+In addition to under-replicated partitions, there are other metrics that are present at
+the overall broker level that should be monitored. While you may not be inclined to
+set alert thresholds for all of them, they provide valuable information about your
+brokers and your cluster. They should be present in any monitoring dashboard you
+create.
+Active controller count
+The active controller count metric indicates whether the broker is currently the con‐
+troller for the cluster. The metric will either be 0 or 1, with 1 showing that the broker
+is currently the controller. At all times, only one broker should be the controller, and
+one broker must always be the controller in the cluster. If two brokers say that they
+are currently the controller, this means that you have a problem where a controller
+thread that should have exited has become stuck. This can cause problems with not
+being able to execute administrative tasks, such as partition moves, properly. To rem‐
+edy this, you will need to restart both brokers at the very least. However, when there
+is an extra controller in the cluster, there will often be problems performing a safe
+shutdown of a broker, and you will need to force stop the broker instead. See
+Table 13-5 for more details on active controller count.
+Table 13-5. Active controller count metric details
+Metric name Active controller count
+JMX MBean kafka.controller:type=KafkaController,name=ActiveControllerCount
+Value range Zero or one
+354 | Chapter 13: Monitoring Kafka
+
+=== PAGE 384 ===
+If no broker claims to be the controller in the cluster, the cluster will fail to respond
+properly in the face of state changes, including topic or partition creation, or broker
+failures. In this situation, you must investigate further to find out why the controller
+threads are not working properly. For example, a network partition from the Zoo‐
+Keeper cluster could result in a problem like this. Once that underlying problem is
+fixed, it is wise to restart all the brokers in the cluster in order to reset state for the
+controller threads.
+Controller queue size
+The controller queue size  metric indicates how many requests the controller is cur‐
+rently waiting to process for the brokers.  The metric will be 0 or more, with the value
+fluctuating frequently as new requests from brokers come in and administrative
+actions, such as creating partitions, moving partitions, and processing leader changes
+happen. Spikes in the metric are to be expected, but if this value continuously increa‐
+ses, or stays steady at a high value and does not drop, it indicates that the controller
+may be stuck. This can cause problems with not being able to execute administrative
+tasks properly. To remedy this, you will need to move the controller to a different
+broker, which requires shutting down the broker that is currently the controller.
+However, when the controller is stuck, there will often be problems performing a
+controlled shutdown of any broker. See Table 13-6 for more details on controller
+queue size.
+Table 13-6. Controller queue size metric details
+Metric name Controller queue size
+JMX MBean kafka.controller:type=ControllerEventManager,name=EventQueueSize
+Value range Integer, zero or more
+Request handler idle ratio
+Kafka uses two thread pools for handling all client requests: network threads and
+request handler threads (also called I/O threads). The network threads are responsible
+for reading and writing data to the clients across the network. This does not require
+significant processing, which means that exhaustion of the network threads is less of a
+concern. The request handler threads, however, are responsible for servicing the cli‐
+ent request itself, which includes reading or writing the messages to disk. As such, as
+the brokers get more heavily loaded, there is a significant impact on this thread pool.
+See Table 13-7 for more details on the request handler idle ratio.
+Kafka Broker Metrics | 355
+
+=== PAGE 385 ===
+Table 13-7. Request handler idle ratio details
+Metric
+name
+Request handler average idle percentage
+JMX
+MBean
+kafka.server:type=KafkaRequestHandlerPool,name=RequestHandlerAvgIdlePercent
+Value
+range
+Float, between zero and one inclusive
+Intelligent Thread Usage
+While it may seem like you will need hundreds of request handler
+threads, in reality you do not need to configure any more threads
+than you have CPUs in the broker. Apache Kafka is very smart
+about the way it uses the request handlers, making sure to offload
+to purgatory those requests that will take a long time to process.
+This is used, for example, when requests are being quoted or when
+more than one acknowledgment of produce requests is required.
+The request handler idle ratio metric indicates the percentage of time the request
+handlers are not in use. The lower this number, the more loaded the broker is. Expe‐
+rience tells us that idle ratios lower than 20% indicate a potential problem, and lower
+than 10% is usually an active performance problem. Besides the cluster being under‐
+sized, there are two reasons for high thread utilization in this pool. The first is that
+there are not enough threads in the pool. In general, you should set the number of
+request handler threads equal to the number of processors in the system (including
+hyperthreaded processors).
+The other common reason for high request handler thread utilization is that the
+threads are doing unnecessary work for each request. Prior to Kafka 0.10, the request
+handler thread was responsible for decompressing every incoming message batch,
+validating the messages and assigning offsets, and then recompressing the message
+batch with offsets before writing it to disk. To make matters worse, the compression
+methods were all behind a synchronous lock. As of version 0.10, there is a new mes‐
+sage format that allows for relative offsets in a message batch. This means that newer
+producers will set relative offsets prior to sending the message batch, which allows the
+broker to skip recompression of the message batch. One of the single largest perfor‐
+mance improvements you can make is to ensure that all producer and consumer cli‐
+ents support the 0.10 message format, and to change the message format version on
+the brokers to 0.10 as well. This will greatly reduce the utilization of the request han‐
+dler threads.
+356 | Chapter 13: Monitoring Kafka
+
+=== PAGE 386 ===
+All topics bytes in
+The all topics bytes in rate, expressed in bytes per second, is useful as a measurement
+of how much message traffic your brokers are receiving from producing clients. This
+is a good metric to trend over time to help you determine when you need to expand
+the cluster or do other growth-related work. It is also useful for evaluating if one
+broker in a cluster is receiving more traffic than the others, which would indicate that
+it is necessary to rebalance the partitions in the cluster. See Table 13-8 for more
+details.
+Table 13-8. All topics bytes in metric details
+Metric name Bytes in per second
+JMX MBean kafka.server:type=BrokerTopicMetrics,name=BytesInPerSec
+Value range Rates as doubles, count as integer
+As this is the first rate metric discussed, it is worth a short discussion of the attributes
+that are provided by these types of metrics. All of the rate metrics have seven
+attributes, and choosing which ones to use depends on what type of measurement
+you want. The attributes provide a discrete count of events, as well as an average of
+the number of events over various periods of time. Make sure to use the metrics
+appropriately, or you will end up with a flawed view of the broker.
+The first two attributes are not measurements, but they will help you understand the
+metric you are looking at:
+EventType
+This is the unit of measurement for all the attributes. In this case, it is “bytes. ”
+RateUnit
+For the rate attributes, this is the time period for the rate. In this case, it is
+“seconds. ”
+These two descriptive attributes tell us that the rates, regardless of the period of time
+they average over, are presented as a value of bytes per second. There are four rate
+attributes provided with different granularities:
+OneMinuteRate
+An average over the previous 1 minute
+FiveMinuteRate
+An average over the previous 5 minutes
+FifteenMinuteRate
+An average over the previous 15 minutes
+Kafka Broker Metrics | 357
+
+=== PAGE 387 ===
+MeanRate
+An average since the broker was started

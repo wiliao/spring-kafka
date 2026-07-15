@@ -1,0 +1,200 @@
+messages.
+commitSync retries committing as long as there is no error that can’t be recov‐
+ered. If this happens, there is not much we can do except log an error.
+Asynchronous Commit
+One drawback of manual commit is that the application is blocked until the broker
+responds to the commit request. This will limit the throughput of the application.
+Throughput can be improved by committing less frequently, but then we are increas‐
+ing the number of potential duplicates that a rebalance may create.
+Another option is the asynchronous commit API. Instead of waiting for the broker to
+respond to a commit, we just send the request and continue on:
+Duration timeout = Duration.ofMillis(100);
+while (true) {
+    ConsumerRecords<String, String> records = consumer.poll(timeout);
+    for (ConsumerRecord<String, String> record : records) {
+        System.out.printf("topic = %s, partition = %s,
+Commits and Offsets | 97
+
+=== PAGE 127 ===
+            offset = %d, customer = %s, country = %s\n",
+            record.topic(), record.partition(), record.offset(),
+            record.key(), record.value());
+    }
+    consumer.commitAsync(); 
+}
+Commit the last offset and carry on.
+The drawback is that while commitSync() will retry the commit until it either suc‐
+ceeds or encounters a nonretriable failure, commitAsync() will not retry. The reason
+it does not retry is that by the time commitAsync() receives a response from the
+server, there may have been a later commit that was already successful. Imagine that
+we sent a request to commit offset 2000. There is a temporary communication prob‐
+lem, so the broker never gets the request and therefore never responds. Meanwhile,
+we processed another batch and successfully committed offset 3000. If commit
+Async() now retries the previously failed commit, it might succeed in committing
+offset 2000 after offset 3000 was already processed and committed. In the case of a
+rebalance, this will cause more duplicates.
+We mention this complication and the importance of correct order of commits
+because commitAsync() also gives you an option to pass in a callback that will be trig‐
+gered when the broker responds. It is common to use the callback to log commit
+errors or to count them in a metric, but if you want to use the callback for retries, you
+need to be aware of the problem with commit order:
+Duration timeout = Duration.ofMillis(100);
+while (true) {
+    ConsumerRecords<String, String> records = consumer.poll(timeout);
+    for (ConsumerRecord<String, String> record : records) {
+        System.out.printf("topic = %s, partition = %s,
+        offset = %d, customer = %s, country = %s\n",
+        record.topic(), record.partition(), record.offset(),
+        record.key(), record.value());
+    }
+    consumer.commitAsync(new OffsetCommitCallback() {
+        public void onComplete(Map<TopicPartition,
+        OffsetAndMetadata> offsets, Exception e) {
+            if (e != null)
+                log.error("Commit failed for offsets {}", offsets, e);
+        }
+    }); 
+}
+We send the commit and carry on, but if the commit fails, the failure and the off‐
+sets will be logged.
+98 | Chapter 4: Kafka Consumers: Reading Data from Kafka
+
+=== PAGE 128 ===
+Retrying Async Commits
+A simple pattern to get the commit order right for asynchronous
+retries is to use a monotonically increasing sequence number.
+Increase the sequence number every time you commit, and add the
+sequence number at the time of the commit to the commitAsync
+callback. When you’re getting ready to send a retry, check if the
+commit sequence number the callback got is equal to the instance
+variable; if it is, there was no newer commit and it is safe to retry. If
+the instance sequence number is higher, don’t retry because a
+newer commit was already sent.
+Combining Synchronous and Asynchronous Commits
+Normally, occasional failures to commit without retrying are not a huge problem
+because if the problem is temporary, the following commit will be successful. But if
+we know that this is the last commit before we close the consumer, or before a reba‐
+lance, we want to make extra sure that the commit succeeds.
+Therefore, a common pattern is to combine commitAsync() with commitSync() just
+before shutdown. Here is how it works (we will discuss how to commit just before
+rebalance when we get to the section about rebalance listeners):
+Duration timeout = Duration.ofMillis(100);
+try {
+    while (!closing) {
+        ConsumerRecords<String, String> records = consumer.poll(timeout);
+        for (ConsumerRecord<String, String> record : records) {
+            System.out.printf("topic = %s, partition = %s, offset = %d,
+                customer = %s, country = %s\n",
+                record.topic(), record.partition(),
+                record.offset(), record.key(), record.value());
+        }
+        consumer.commitAsync(); 
+    }
+    consumer.commitSync(); 
+} catch (Exception e) {
+    log.error("Unexpected error", e);
+} finally {
+        consumer.close();
+}
+While everything is fine, we use commitAsync. It is faster, and if one commit fails,
+the next commit will serve as a retry.
+But if we are closing, there is no “next commit. ” We call commitSync(), because it
+will retry until it succeeds or suffers unrecoverable failure.
+Commits and Offsets | 99
+
+=== PAGE 129 ===
+Committing a Specified Offset
+Committing the latest offset only allows you to commit as often as you finish process‐
+ing batches. But what if you want to commit more frequently than that? What if
+poll() returns a huge batch and you want to commit offsets in the middle of the
+batch to avoid having to process all those rows again if a rebalance occurs?  Y ou can’t
+just call commitSync() or commitAsync()—this will commit the last offset returned,
+which you didn’t get to process yet.
+Fortunately, the Consumer API allows you to call commitSync() and commitAsync()
+and pass a map of partitions and offsets that you wish to commit. If you are in the
+middle of processing a batch of records, and the last message you got from partition 3
+in topic “customers” has offset 5000, you can call commitSync() to commit offset
+5001 for partition 3 in topic “customers. ” Since your consumer may be consuming
+more than a single partition, you will need to track offsets on all of them, which adds
+complexity to your code.
+Here is what a commit of specific offsets looks like:
+private Map<TopicPartition, OffsetAndMetadata> currentOffsets =
+    new HashMap<>(); 
+int count = 0;
+....
+Duration timeout = Duration.ofMillis(100);
+while (true) {
+    ConsumerRecords<String, String> records = consumer.poll(timeout);
+    for (ConsumerRecord<String, String> record : records) {
+        System.out.printf("topic = %s, partition = %s, offset = %d,
+            customer = %s, country = %s\n",
+            record.topic(), record.partition(), record.offset(),
+            record.key(), record.value()); 
+        currentOffsets.put(
+            new TopicPartition(record.topic(), record.partition()),
+            new OffsetAndMetadata(record.offset()+1, "no metadata")); 
+        if (count % 1000 == 0)   
+            consumer.commitAsync(currentOffsets, null); 
+        count++;
+    }
+}
+This is the map we will use to manually track offsets.
+Remember, println is a stand-in for whatever processing you do for the records
+you consume.
+100 | Chapter 4: Kafka Consumers: Reading Data from Kafka
+
+=== PAGE 130 ===
+After reading each record, we update the offsets map with the offset of the next
+message we expect to process. The committed offset should always be the offset
+of the next message that your application will read. This is where we’ll start read‐
+ing next time we start.
+Here, we decide to commit current offsets every 1,000 records. In your applica‐
+tion, you can commit based on time or perhaps content of the records.
+I chose to call commitAsync() (without a callback, therefore the second parame‐
+ter is null), but commitSync() is also completely valid here. Of course, when
+committing specific offsets you still need to perform all the error handling we’ve
+seen in previous sections.
+Rebalance Listeners
+As we mentioned in the previous section about committing offsets, a consumer will
+want to do some cleanup work before exiting and also before partition rebalancing.
+If you know your consumer is about to lose ownership of a partition, you will want to
+commit offsets of the last event you’ve processed. Perhaps you also need to close file
+handles, database connections, and such.
+The Consumer API allows you to run your own code when partitions are added or
+removed from the consumer. Y ou do this by passing a ConsumerRebalanceListener
+when calling the subscribe() method we discussed previously. ConsumerRebalance
+Listener has three methods you can implement:
+public void onPartitionsAssigned(Collection<TopicPartition> partitions)
+Called after partitions have been reassigned to the consumer but before the con‐
+sumer starts consuming messages. This is where you prepare or load any state
+that you want to use with the partition, seek to the correct offsets if needed, or
+similar. Any preparation done here should be guaranteed to return within
+max.poll.timeout.ms so the consumer can successfully join the group.
+public void onPartitionsRevoked(Collection<TopicPartition> partitions)
+Called when the consumer has to give up partitions that it previously owned—
+either as a result of a rebalance or when the consumer is being closed. In the
+common case, when an eager rebalancing algorithm is used, this method is
+invoked before the rebalancing starts and after the consumer stopped consuming
+messages. If a cooperative rebalancing algorithm is used, this method is invoked
+at the end of the rebalance, with just the subset of partitions that the consumer
+has to give up. This is where you want to commit offsets, so whoever gets this
+partition next will know where to start.
+Rebalance Listeners | 101
+
+=== PAGE 131 ===
+public void onPartitionsLost(Collection<TopicPartition> partitions)
+Only called when a cooperative rebalancing algorithm is used, and only in excep‐
+tional cases where the partitions were assigned to other consumers without first
+being revoked by the rebalance algorithm (in normal cases, onPartitions
+Revoked() will be called). This is where you clean up any state or resources that
+are used with these partitions. Note that this has to be done carefully—the new
+owner of the partitions may have already saved its own state, and you’ll need to
+avoid conflicts. Note that if you don’t implement this method, onPartitions
+Revoked() will be called instead.
+If you use a cooperative rebalancing algorithm, note that:
+• onPartitionsAssigned() will be invoked on every rebalance,
+as a way of notifying the consumer that a rebalance happened.
+However, if there are no new partitions assigned to the con‐
+sumer, it will be called with an empty collection.
+• onPartitionsRevoked() will be invoked in normal rebalanc‐
+ing conditions, but only if the consumer gave up the owner‐

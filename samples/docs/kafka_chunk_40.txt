@@ -1,0 +1,200 @@
+that will never be reused won’t take up a significant part of the
+broker memory.
+Performance of Transactions
+Transactions add moderate overhead to the producer. The request to register transac‐
+tional ID occurs once in the producer lifecycle. Additional calls to register partitions
+as part of a transaction happen at most one per partition for each transaction, then
+each transaction sends a commit request, which causes an extra commit marker to be
+written on each partition. The transactional initialization and transaction commit
+requests are synchronous, so no data will be sent until they complete successfully, fail,
+or time out, which further increases the overhead.
+Note that the overhead of transactions on the producer is independent of the number
+of messages in a transaction. So a larger number of messages per transaction will both
+reduce the relative overhead and reduce the number of synchronous stops, resulting
+in higher throughput overall.
+On the consumer side, there is some overhead involved in reading commit markers.
+The key impact that transactions have on consumer performance is introduced by the
+fact that consumers in read_committed mode will not return records that are part of
+an open transaction. Long intervals between transaction commits mean that the con‐
+sumer will need to wait longer before returning messages, and as a result, end-to-end
+latency will increase.
+200 | Chapter 8: Exactly-Once Semantics
+
+=== PAGE 230 ===
+Note, however, that the consumer does not need to buffer messages that belong to
+open transactions. The broker will not return those in response to fetch requests
+from the consumer. Since there is no extra work for the consumer when reading
+transactions, there is no decrease in throughput either.
+Summary
+Exactly-once semantics in Kafka is the opposite of chess: it is challenging to under‐
+stand but easy to use.
+This chapter covered the two key mechanisms that provide exactly-once guarantees
+in Kafka: idempotent producer, which avoids duplicates that are caused by the retry
+mechanism, and transactions, which form the basis of exactly-once semantics in
+Kafka Streams.
+Both can be enabled in a single configuration and allow us to use Kafka for applica‐
+tions that require fewer duplicates and stronger correctness guarantees.
+We discussed in depth specific scenarios and use cases to show the expected behavior,
+and even looked at some of the implementation details. Those details are important
+when troubleshooting applications or when using transactional APIs directly.
+By understanding what Kafka’s exactly-once semantics guarantee in which use case,
+we can design applications that will use exactly-once when necessary. Application
+behavior should not be surprising, and the information in this chapter will help us
+avoid surprises.
+Summary | 201
+
+=== PAGE 232 ===
+CHAPTER 9
+Building Data Pipelines
+When people discuss building data pipelines using Apache Kafka, they are usually
+referring to a couple of use cases. The first is building a data pipeline where Apache
+Kafka is one of the two end points—for example, getting data from Kafka to S3 or
+getting data from MongoDB into Kafka. The second use case involves building a
+pipeline between two different systems but using Kafka as an intermediary. An exam‐
+ple of this is getting data from Twitter to Elasticsearch by sending the data first from
+Twitter to Kafka and then from Kafka to Elasticsearch.
+When we added Kafka Connect to Apache Kafka in version 0.9, it was after we saw
+Kafka used in both use cases at LinkedIn and other large organizations. We noticed
+that there were specific challenges in integrating Kafka into data pipelines that every
+organization had to solve, and decided to add APIs to Kafka that solve some of those
+challenges rather than force every organization to figure them out from scratch.
+The main value Kafka provides to data pipelines is its ability to serve as a very large,
+reliable buffer between various stages in the pipeline. This effectively decouples pro‐
+ducers and consumers of data within the pipeline and allows use of the same data
+from the source in multiple target applications and systems, all with different timeli‐
+ness and availability requirements. This decoupling, combined with reliability, secu‐
+rity, and efficiency, makes Kafka a good fit for most data pipelines.
+203
+
+=== PAGE 233 ===
+Putting Data Integration in Context
+Some organizations think of Kafka as an end point of a pipeline.
+They look at questions such as “How do I get data from Kafka to
+Elastic?” This is a valid question to ask—especially if there is data
+you need in Elastic and it is currently in Kafka—and we will look at
+ways to do exactly this. But we are going to start the discussion by
+looking at the use of Kafka within a larger context that includes at
+least two (and possibly many more) end points that are not Kafka
+itself. We encourage anyone faced with a data-integration problem
+to consider the bigger picture and not focus only on the immediate
+end points. Focusing on short-term integrations is how you end up
+with a complex and expensive-to-maintain data integration mess.
+In this chapter, we’ll discuss some of the common issues that you need to take into
+account when building data pipelines. Those challenges are not specific to Kafka but
+are general data integration problems. Nonetheless, we will show why Kafka is a good
+fit for data integration use cases and how it addresses many of those challenges. We
+will discuss how the Kafka Connect API is different from the normal producer and
+consumer clients, and when each client type should be used. Then we’ll jump into
+some details of Kafka Connect. While a full discussion of Kafka Connect is outside
+the scope of this chapter, we will show examples of basic usage to get you started and
+give you pointers on where to learn more. Finally, we’ll discuss other data integration
+systems and how they integrate with Kafka.
+Considerations When Building Data Pipelines
+While we won’t get into all the details on building data pipelines here, we would like
+to highlight some of the most important things to take into account when designing
+software architectures with the intent of integrating multiple systems.
+Timeliness
+Some systems expect their data to arrive in large bulks once a day; others expect the
+data to arrive a few milliseconds after it is generated. Most data pipelines fit some‐
+where in between these two extremes. Good data integration systems can support dif‐
+ferent timeliness requirements for different pipelines and also make the migration
+between different timetables easier as business requirements change. Kafka, being a
+streaming data platform with scalable and reliable storage, can be used to support
+anything from near-real-time pipelines to daily batches. Producers can write to Kafka
+as frequently and infrequently as needed, and consumers can also read and deliver
+the latest events as they arrive. Or consumers can work in batches: run every hour,
+connect to Kafka, and read the events that accumulated during the previous hour.
+204 | Chapter 9: Building Data Pipelines
+
+=== PAGE 234 ===
+A useful way to look at Kafka in this context is that it acts as a giant buffer that decou‐
+ples the time-sensitivity requirements between producers and consumers. Producers
+can write events in real time, while consumers process batches of events, or vice
+versa. This also makes it trivial to apply back pressure—Kafka itself applies back pres‐
+sure on producers (by delaying acks when needed) since consumption rate is driven
+entirely by the consumers.
+Reliability
+We want to avoid single points of failure and allow for fast and automatic recovery
+from all sorts of failure events. Data pipelines are often the way data arrives to
+business-critical systems; failure for more than a few seconds can be hugely disrup‐
+tive, especially when the timeliness requirement is closer to the few milliseconds end
+of the spectrum. Another important consideration for reliability is delivery guaran‐
+tees—some systems can afford to lose data, but most of the time there is a require‐
+ment for at-least-once delivery, which means every event from the source system will
+reach its destination, but sometimes retries will cause duplicates. Often, there is even
+a requirement for exactly-once delivery—every event from the source system will
+reach the destination with no possibility for loss or duplication.
+We discussed Kafka’s availability and reliability guarantees in depth in Chapter 7. As
+we discussed, Kafka can provide at-least-once on its own, and exactly-once when
+combined with an external data store that has a transactional model or unique keys.
+Since many of the end points are data stores that provide the right semantics for
+exactly-once delivery, a Kafka-based pipeline can often be implemented as exactly-
+once. It is worth highlighting that Kafka’s Connect API makes it easier for connectors
+to build an end-to-end exactly-once pipeline by providing an API for integrating with
+the external systems when handling offsets. Indeed, many of the available open
+source connectors support exactly-once delivery.
+High and Varying Throughput
+The data pipelines we are building should be able to scale to very high throughputs,
+as is often required in modern data systems. Even more importantly, they should be
+able to adapt if throughput suddenly increases.
+With Kafka acting as a buffer between producers and consumers, we no longer need
+to couple consumer throughput to the producer throughput. We no longer need to
+implement a complex back-pressure mechanism because if producer throughput
+exceeds that of the consumer, data will accumulate in Kafka until the consumer can
+catch up. Kafka’s ability to scale by adding consumers or producers independently
+allows us to scale either side of the pipeline dynamically and independently to match
+the changing requirements.
+Considerations When Building Data Pipelines | 205
+
+=== PAGE 235 ===
+Kafka is a high-throughput distributed system—capable of processing hundreds of
+megabytes per second on even modest clusters—so there is no concern that our pipe‐
+line will not scale as demand grows. In addition, the Kafka Connect API focuses on
+parallelizing the work and can do this on a single node as well as by scaling out,
+depending on system requirements. We’ll describe in the following sections how the
+platform allows data sources and sinks to split the work among multiple threads of
+execution and use the available CPU resources even when running on a single
+machine.
+Kafka also supports several types of compression, allowing users and admins to con‐
+trol the use of network and storage resources as the throughput requirements
+increase.
+Data Formats
+One of the most important considerations in a data pipeline is reconciling different
+data formats and data types. The data types supported vary among different databases
+and other storage systems. Y ou may be loading XMLs and relational data into Kafka,
+using Avro within Kafka, and then need to convert data to JSON when writing it to
+Elasticsearch, to Parquet when writing to HDFS, and to CSV when writing to S3.
+Kafka itself and the Connect API are completely agnostic when it comes to data for‐
+mats. As we’ve seen in previous chapters, producers and consumers can use any seri‐
+alizer to represent data in any format that works for you. Kafka Connect has its own
+in-memory objects that include data types and schemas, but as we’ll soon discuss, it
+allows for pluggable converters to allow storing these records in any format. This
+means that no matter which data format you use for Kafka, it does not restrict your
+choice of connectors.
+Many sources and sinks have a schema; we can read the schema from the source with
+the data, store it, and use it to validate compatibility or even update the schema in the
+sink database. A classic example is a data pipeline from MySQL to Snowflake. If
+someone added a column in MySQL, a great pipeline will make sure the column gets
+added to Snowflake too as we are loading new data into it.
+In addition, when writing data from Kafka to external systems, sink connectors are
+responsible for the format in which the data is written to the external system. Some
+connectors choose to make this format pluggable. For example, the S3 connector
+allows a choice between Avro and Parquet formats.
+It is not enough to support different types of data. A generic data integration frame‐
+work should also handle differences in behavior between various sources and sinks.
+For example, Syslog is a source that pushes data, while relational databases require
+the framework to pull data out. HDFS is append-only and we can only write data to
+it, while most systems allow us to both append data and update existing records.
+206 | Chapter 9: Building Data Pipelines
+
+=== PAGE 236 ===
+Transformations
+Transformations are more controversial than other requirements. There are generally
+two approaches to building data pipelines: ETL and ELT. ETL, which stands for
+Extract-Transform-Load, means that the data pipeline is responsible for making mod‐
+ifications to the data as it passes through. It has the perceived benefit of saving time
+and storage because you don’t need to store the data, modify it, and store it again.
+Depending on the transformations, this benefit is sometimes real, but sometimes it
+shifts the burden of computation and storage to the data pipeline itself, which may or
+may not be desirable. The main drawback of this approach is that the transformations
+that happen to the data in the pipeline may tie the hands of those who wish to process

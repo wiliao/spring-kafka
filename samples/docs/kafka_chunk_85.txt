@@ -1,0 +1,200 @@
+metrics, 373-376
+consumer coordinator metrics, 375
+fetch manager metrics, 373
+per-broker and per-topic, 375
+quotas, 376
+monitoring for MirrorMaker in production,
+256
+multiple, Kafka handling of, 10
+offset migration in MirrorMaker, 250
+poll loop, 86-87
+in read_committed or read_uncommitted
+mode, 190
+rebalance listeners, 101-103
+standalone, using without a group, 110
+stopping for import of offsets by consumer
+group, 315
+subscribing to topics, 85
+time-sensitivity requirements between pro‐
+ducers and, Kafka decopuling, 204
+tuning configuration in MirrorMaker, 258
+using in a reliable system, 172-176
+Index | 437
+
+=== PAGE 467 ===
+explicitly committing offsets in consum‐
+ers, 174-176
+important configuration properties for
+reliable processing, 173
+zombie, 188
+ZooKeeper and, 45
+controller (cluster), 8, 136-139
+controller election, testing, 177
+diagnosing problems with, 348
+moving, 335
+new KRaft controller, 137
+controller (disk), 353
+controller queue size metric, 355
+converters, use by Kafka Connect, 211, 212
+converter-specific configuration parameters,
+212
+converters and Connect's data model, 227
+cooperative rebalances, 81, 102, 415
+CooperativeStickyAssignor, 92
+cost
+considerations in determining number of
+replicas per topic, 166
+higher cost to communicate between clus‐
+ters, 235
+coupling
+decoupliing data sources and targets in data
+pipelines, 209
+decoupling of writing and reading messages
+in Kafka, 5
+decoupling producers and consumers, 15
+CPUs, 35
+capacity, considerations in clusters, 38
+failure of, 353
+usage metrics, 367
+CreateTopicsResult object, 114
+credentials for authentication, 208
+cross-cluster data mirroring, 233-263
+MirrorMaker, 247-259
+configuring MirrorMaker, 249
+deploying MirrorMaker in production,
+253-256
+security, 252
+tuning MirrorMaker, 257-259
+multicluster architectures, 235-247
+active-active architecture, 238-240
+active-standby architecture, 240-245
+hub-and-spoke architecture, 236-238
+realities of cross-datacenter communica‐
+tion, 235
+other solutions, 259-263
+Confluent cross-datacenter mirroring
+solutions, 261
+LinkedIn Brooklin, 260
+Uber uReplicator, 259
+use cases, 234
+Cruise Control, 348
+CSV files
+exporting offsets to, 314
+importing offsets for cosumer group from,
+315
+customer service, use of stream processing, 416
+D
+DAGs (see directed acyclic graphs)
+data ecosystem, 12-14
+data formats, reconciling in data pipelines, 206
+data ingestion tools, 229
+data integration, putting in context, 204
+data integrity, 267
+data pipelines, building, 203-231
+alternatives to Kafka Connect, 229-230
+considerations, 204-210
+coupling and agility, 209
+data formats, 206
+failure handling, 209
+high and varying throughput, 205
+reliability, 205
+security, 208
+timeliness, 204
+transformations, 207
+deciding when to use Kafka Connect versus
+producer and consumer, 210
+Kafka Connect, 211-229
+connector example, file source to file
+sink, 214-216
+connector example, MySQL to Elastic‐
+search, 216-222
+running, 211-214
+single message transformations, 223
+understanding how Kafka Connect
+works, 225-229
+data privacy, 267
+data transformations (see transformations)
+data types, 206
+data-driven enterprises, 1
+databases
+reading from and writing to Kafka, then to
+another database, 192
+438 | Index
+
+=== PAGE 468 ===
+reading from Kafka topic and writing to
+database, 191
+datacenters
+2.5 DC architecture for stretch clusters, 247
+layout concerns for production environ‐
+ment, 43
+multiple, 9
+realities of cross-datacenter communication,
+235
+dead letter queues, 225
+Debezium Project
+blog post on outbox pattern, 192
+change capture connectors for variety of
+databases, 220
+debugging
+metrics for, 341
+using log4j logs, 298
+using logging information for, 370
+decorating messages, 13
+decoupling producers and consumers, 203
+default.api.timeout.ms parameter, 90
+default.replication.factor parameter, 29, 165
+DefaultEncoder, 320
+DefaultMessageFormatter, 324
+options to use with --property option, 325
+delegation tokens, 285-286
+configuring, 286
+security considerations, 286
+delete retention policy, 156
+delete.and.compact retention policy, 156
+delete.topic.enable configuration, 27, 311
+deleted events, 158
+deleteRecords method, 128
+deletion of topics, 120
+delivery.timeout.ms parameter, 57, 171
+Deny ACLs, 287, 298
+deployment
+secure, guarantees by, 267
+DES-MD5 encryption algorithm, 277
+DescribeClusterOptions object, 114
+DescribeTopicResult object, 119
+directed acyclic graphs (DAGs), 402, 410
+disaster recovery
+planning in active-standby architecture,
+241-245
+after the failover, 245
+cluster discovery, 245
+data loss and inconsistencies in unplan‐
+ned failover, 241
+start offset for applications after failover,
+242
+stretch clusters and, 246
+use of cross-cluster data mirroring, 234
+disk faults, introducing, 178
+disk performance
+using time-based segments, 32
+disk space
+partition allocation and, 152
+disks
+capacity, 34
+failure of, 353
+Linux, tuning for Kafka clusters, 41
+monitoring usage of disk space and inodes,
+368
+throughput, 33
+DNS
+client.dns.lookup configuration, 116
+DNS name with multiple IP addresses,
+117
+use of DNS aliases, 116
+discovery service, 245
+secure DNS service reqired by Kerberos, 276
+DR (see disaster recovery)
+DSL API (Kafka Streams), 402
+DumpLogSegment tool, 155
+duplication

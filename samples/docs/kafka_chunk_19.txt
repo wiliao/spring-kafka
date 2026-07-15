@@ -1,0 +1,200 @@
+record came from, the offset of the record within the partition, and, of course,
+the key and the value of the record. Typically, we want to iterate over the list and
+process the records individually.
+Processing usually ends in writing a result in a data store or updating a stored
+record. Here, the goal is to keep a running count of customers from each country,
+86 | Chapter 4: Kafka Consumers: Reading Data from Kafka
+
+=== PAGE 116 ===
+so we update a hash table and print the result as JSON. A more realistic example
+would store the updates result in a data store.
+The poll loop does a lot more than just get data. The first time you call poll() with a
+new consumer, it is responsible for finding the GroupCoordinator, joining the con‐
+sumer group, and receiving a partition assignment. If a rebalance is triggered, it will
+be handled inside the poll loop as well, including related callbacks. This means that
+almost everything that can go wrong with a consumer or in the callbacks used in its
+listeners is likely to show up as an exception thrown by poll().
+Keep in mind that if poll() is not invoked for longer than max.poll.interval.ms,
+the consumer will be considered dead and evicted from the consumer group, so avoid
+doing anything that can block for unpredictable intervals inside the poll loop.
+Thread Safety
+Y ou can’t have multiple consumers that belong to the same group in one thread, and
+you can’t have multiple threads safely use the same consumer. One consumer per
+thread is the rule. To run multiple consumers in the same group in one application,
+you will need to run each in its own thread. It is useful to wrap the consumer logic in
+its own object and then use Java’s ExecutorService to start multiple threads, each
+with its own consumer. The Confluent blog has a tutorial that shows how to do just
+that.
+In older versions of Kafka, the full method signature was
+poll(long); this signature is now deprecated and the new API is
+poll(Duration). In addition to the change of argument type, the
+semantics of how the method blocks subtly changed. The original
+method, poll(long), will block as long as it takes to get the needed
+metadata from Kafka, even if this is longer than the timeout dura‐
+tion. The new method, poll(Duration), will adhere to the timeout
+restrictions and not wait for metadata. If you have existing con‐
+sumer code that uses poll(0) as a method to force Kafka to get the
+metadata without consuming any records (a rather common hack),
+you can’t just change it to poll(Duration.ofMillis(0)) and
+expect the same behavior. Y ou’ll need to figure out a new way to
+achieve your goals. Often the solution is placing the logic in the
+rebalanceListener.onPartitionAssignment() method, which is
+guaranteed to get called after you have metadata for the assigned
+partitions but before records start arriving. Another solution was
+documented by Jesse Anderson in his blog post “Kafka’s Got a
+Brand-New Poll”.
+The Poll Loop | 87
+
+=== PAGE 117 ===
+Another approach can be to have one consumer populate a queue of events and have
+multiple worker threads perform work from this queue. Y ou can see an example of
+this pattern in a blog post from Igor Buzatović.
+Configuring Consumers
+So far we have focused on learning the Consumer API, but we’ve only looked at a few
+of the configuration properties—just the mandatory bootstrap.servers, group.id,
+key.deserializer, and value.deserializer. All of the consumer configuration is
+documented in the Apache Kafka documentation. Most of the parameters have rea‐
+sonable defaults and do not require modification, but some have implications on the
+performance and availability of the consumers. Let’s take a look at some of the more
+important properties.
+fetch.min.bytes
+This property allows a consumer to specify the minimum amount of data that it
+wants to receive from the broker when fetching records, by default one byte. If a
+broker receives a request for records from a consumer but the new records amount to
+fewer bytes than fetch.min.bytes, the broker will wait until more messages are
+available before sending the records back to the consumer. This reduces the load on
+both the consumer and the broker, as they have to handle fewer back-and-forth mes‐
+sages in cases where the topics don’t have much new activity (or for lower-activity
+hours of the day). Y ou will want to set this parameter higher than the default if the
+consumer is using too much CPU when there isn’t much data available, or reduce
+load on the brokers when you have a large number of consumers—although keep in
+mind that increasing this value can increase latency for low-throughput cases.
+fetch.max.wait.ms
+By setting fetch.min.bytes, you tell Kafka to wait until it has enough data to send
+before responding to the consumer. fetch.max.wait.ms lets you control how long to
+wait. By default, Kafka will wait up to 500 ms. This results in up to 500 ms of extra
+latency in case there is not enough data flowing to the Kafka topic to satisfy the mini‐
+mum amount of data to return. If you want to limit the potential latency (usually due
+to SLAs controlling the maximum latency of the application), you can set
+fetch.max.wait.ms to a lower value. If you set fetch.max.wait.ms to 100 ms and
+fetch.min.bytes to 1 MB, Kafka will receive a fetch request from the consumer and
+will respond with data either when it has 1 MB of data to return or after 100 ms,
+whichever happens first.
+88 | Chapter 4: Kafka Consumers: Reading Data from Kafka
+
+=== PAGE 118 ===
+fetch.max.bytes
+This property lets you specify the maximum bytes that Kafka will return whenever
+the consumer polls a broker (50 MB by default). It is used to limit the size of memory
+that the consumer will use to store data that was returned from the server, irrespec‐
+tive of how many partitions or messages were returned. Note that records are sent to
+the client in batches, and if the first record-batch that the broker has to send exceeds
+this size, the batch will be sent and the limit will be ignored. This guarantees that the
+consumer can continue making progress. It’s worth noting that there is a matching
+broker configuration that allows the Kafka administrator to limit the maximum fetch
+size as well. The broker configuration can be useful because requests for large
+amounts of data can result in large reads from disk and long sends over the network,
+which can cause contention and increase load on the broker.
+max.poll.records
+This property controls the maximum number of records that a single call to poll()
+will return. Use this to control the amount of data (but not the size of data) your
+application will need to process in one iteration of the poll loop.
+max.partition.fetch.bytes
+This property controls the maximum number of bytes the server will return per parti‐
+tion (1 MB by default). When KafkaConsumer.poll() returns ConsumerRecords, the
+record object will use at most max.partition.fetch.bytes per partition assigned to
+the consumer. Note that controlling memory usage using this configuration can be
+quite complex, as you have no control over how many partitions will be included in
+the broker response. Therefore, we highly recommend using fetch.max.bytes
+instead, unless you have special reasons to try and process similar amounts of data
+from each partition.
+session.timeout.ms and heartbeat.interval.ms
+The amount of time a consumer can be out of contact with the brokers while still
+considered alive defaults to 10 seconds. If more than session.timeout.ms passes
+without the consumer sending a heartbeat to the group coordinator, it is considered
+dead and the group coordinator will trigger a rebalance of the consumer group to
+allocate partitions from the dead consumer to the other consumers in the group.  This
+property is closely related to heartbeat.interval.ms, which controls how frequently
+the Kafka consumer will send a heartbeat to the group coordinator, whereas
+session.timeout.ms controls how long a consumer can go without sending a heart‐
+beat. Therefore, those two properties are typically modified together— heartbeat.
+interval.ms must be lower than session.timeout.ms and is usually set to one-third
+Configuring Consumers | 89
+
+=== PAGE 119 ===
+of the timeout value. So if session.timeout.ms is 3 seconds, heartbeat.
+interval.ms should be 1 second. Setting session.timeout.ms lower than the default
+will allow consumer groups to detect and recover from failure sooner but may also
+cause unwanted rebalances. Setting session.timeout.ms higher will reduce the
+chance of accidental rebalance but also means it will take longer to detect a real
+failure.
+max.poll.interval.ms
+This property lets you set the length of time during which the consumer can go
+without polling before it is considered dead. As mentioned earlier, heartbeats and ses‐
+sion timeouts are the main mechanism by which Kafka detects dead consumers and
+takes their partitions away. However, we also mentioned that heartbeats are sent by a
+background thread. There is a possibility that the main thread consuming from Kafka
+is deadlocked, but the background thread is still sending heartbeats. This means that
+records from partitions owned by this consumer are not being processed. The easiest
+way to know whether the consumer is still processing records is to check whether it is
+asking for more records. However, the intervals between requests for more records
+are difficult to predict and depend on the amount of available data, the type of pro‐
+cessing done by the consumer, and sometimes on the latency of additional services.
+In applications that need to do time-consuming processing on each record that is
+returned, max.poll.records is used to limit the amount of data returned and there‐
+fore limit the duration before the application is available to poll() again. Even with
+max.poll.records defined, the interval between calls to poll() is difficult to predict,
+and max.poll.interval.ms is used as a fail-safe or backstop. It has to be an interval
+large enough that it will very rarely be reached by a healthy consumer but low enough
+to avoid significant impact from a hanging consumer. The default value is 5 minutes.
+When the timeout is hit, the background thread will send a “leave group” request to
+let the broker know that the consumer is dead and the group must rebalance, and
+then stop sending heartbeats.
+default.api.timeout.ms
+This is the timeout that will apply to (almost) all API calls made by the consumer
+when you don’t specify an explicit timeout while calling the API. The default is 1
+minute, and since it is higher than the request timeout default, it will include a retry
+when needed. The notable exception to APIs that use this default is the poll()
+method that always requires an explicit timeout.
+request.timeout.ms
+This is the maximum amount of time the consumer will wait for a response from the
+broker. If the broker does not respond within this time, the client will assume the
+90 | Chapter 4: Kafka Consumers: Reading Data from Kafka
+
+=== PAGE 120 ===
+broker will not respond at all, close the connection, and attempt to reconnect. This
+configuration defaults to 30 seconds, and it is recommended not to lower it. It is
+important to leave the broker with enough time to process the request before giving
+up—there is little to gain by resending requests to an already overloaded broker, and
+the act of disconnecting and reconnecting adds even more overhead.
+auto.offset.reset
+This property controls the behavior of the consumer when it starts reading a partition
+for which it doesn’t have a committed offset, or if the committed offset it has is inva‐
+lid (usually because the consumer was down for so long that the record with that off‐
+set was already aged out of the broker). The default is “latest, ” which means that
+lacking a valid offset, the consumer will start reading from the newest records
+(records that were written after the consumer started running). The alternative is
+“earliest, ” which means that lacking a valid offset, the consumer will read all the data
+in the partition, starting from the very beginning. Setting auto.offset.reset to none
+will cause an exception to be thrown when attempting to consume from an invalid
+offset.
+enable.auto.commit
+This parameter controls whether the consumer will commit offsets automatically, and
+defaults to true. Set it to false if you prefer to control when offsets are committed,
+which is necessary to minimize duplicates and avoid missing data. If you set
+enable.auto.commit to true, then you might also want to control how frequently
+offsets will be committed using auto.commit.interval.ms. We’ll discuss the different
+options for committing offsets in more depth later in this chapter.
+partition.assignment.strategy
+We learned that partitions are assigned to consumers in a consumer group. A
+PartitionAssignor is a class that, given consumers and topics they subscribed to,
+decides which partitions will be assigned to which consumer.  By default, Kafka has
+the following assignment strategies:
+Range
+Assigns to each consumer a consecutive subset of partitions from each topic it
+subscribes to. So if consumers C1 and C2 are subscribed to two topics, T1 and
+T2, and each of the topics has three partitions, then C1 will be assigned partitions
+0 and 1 from topics T1 and T2, while C2 will be assigned partition 2 from those
+topics. Because each topic has an uneven number of partitions and the assign‐
+ment is done for each topic independently, the first consumer ends up with more
+partitions than the second. This happens whenever Range assignment is used and

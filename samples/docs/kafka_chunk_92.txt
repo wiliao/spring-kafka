@@ -1,0 +1,200 @@
+send.buffer.bytes parameter, 61, 93, 257
+sendOffsetsToTransaction method, 199
+sequence IDs, 184, 185
+Serde classes, 405, 409
+Serdes.String class, 405
+serial attached storage (serial ATA), 34
+serialization/deserialization
+defining serializers for consumers, 84
+deserializer for console consumer messages,
+325
+deserializers for consumers, 106-110
+deserializing message by passing in decoder,
+333
+JSON serializer and deserializer, 405
+producer serializers, 61-68
+custom serializers, 62
+Index | 451
+
+=== PAGE 481 ===
+serializing using Avro, 64
+using Avro records with Kafka, 65-68
+serializer for console consumer and pro‐
+ducer, 320
+Serializer interface, 50
+serializers and deserializers, 289
+servers
+establishing authenticity of, 267
+hostname verification, 271
+typical servers and problems, 352
+ZooKeeper, configuring in ensemble, 22
+ZooKeeper, standalone, 21
+service-level agreements (see SLAs)
+service-level indicators (see SLIs)
+service-level objectives (see SLOs)
+session window, 390
+session.timeout.ms configuration, 84, 89
+shuffling, 414
+ShutdownHook, 105
+SimpleAuthorizer, 291
+single message transformations (SMTs), 207,
+223
+single-event processing, 392
+sink connectors, 206
+error.tolerance configuration, 225
+sinks, 206
+SLAs (service-level agreements), 344
+SLIs (service-level indicators)
+defined, 343
+metrics that make good SLIs, 344
+SLOs (service-level objectives), 343
+defined, 343
+metrics that make good SLIs, 344
+service-level definitions, 343
+using in alerting, 345
+SMART (Self-Monitoring, Analysis, and
+Reporting Technology) tools, 353
+snappy compression, 59
+Snowflake, data pipeline between MySQL and,
+206
+socket.receive.buffer.bytes parameter, 257
+socket.send.buffer.bytes parameter, 257
+solid-state disks (SSDs), 33
+SSL (Secure Sockets Layer), 268, 270
+client authentication, 271
+configuring for ZooKeeper, 300
+configuring TLS, 270
+encrypting cross-datacenter traffic, 252
+performance impacts of, 270
+renegotiation not supported by Kafka, 287
+TLS/SSL, 269
+ssl.client.auth parameter, 271
+ssl.principal.mapping.rules parameter, 271
+stale metrics, 343
+standalone consumer, 110
+standalone mode, Kafka Connect, 214
+standalone server (ZooKeeper), 20
+standby replica, 416
+state, 388
+consumer application managing, 125
+consumers maintaining, 176
+controllers tracking latest state, 139
+external, 389
+local or internal, 388
+processing with local state, 393
+stream processing application state, 401
+static group membership (consumers), 83
+StickyAssignor, 92
+stock market statistics example (Kafka
+Streams), 405-408
+storage
+disk capacity, 34
+disk throughput, 33
+durable, of messages, 8
+physical, 149-159
+compaction, 156-158
+deleted events, 158
+encryption of data, 289
+file format, 153
+file management, 152
+partition allocation, 151
+tiered storage, 149
+when topic compaction occurs, 159
+stream processing, 6, 381-419
+about, 382-385
+additional tools for, 431
+books about, 382
+concepts, 385-392
+processing guarantees, 392
+state, 388
+stream-table duality, 389
+time, 386
+time windows, 390
+topology, 385
+defined, 385
+design patterns, 392-402
+interactive queries, 401
+452 | Index
+
+=== PAGE 482 ===
+multiphase processing/repartitioning,
+395
+out-of-sequence events, 399
+processing with external lookup, stream-
+table joins, 396
+reprocessing, 400
+single-event processing, 392
+streaming join, 398
+table-table joins, 398
+Kafka Streams examples, 402-410
+side effects while, 191
+use cases, 416-417
+using Kafka, 14
+stream processing applications
+transactions allowing accurate results from,
+186
+stream processing frameworks, 230
+choosing a framework, 417
+stream, defined, 6
+stream-table joins, 396
+stream-to-stream joins, 409
+StreamBuilder object, 403
+streaming joins, 398
+streaming platform features (Kafka), 11
+Streams AP (see Kafka Streams)
+StreamsBuilder.build method, 411
+StreamsConfig.TOPOLOGY_OPTIMIZA‐
+TION, 411
+stretch clusters, 261
+2.5 DC (datacenter) architecture, 247
+StringDeserializer, 107
+subscribers, 7
+(see also consumers)
+super.users configuration (AclAuthorizer), 295
+swap space (Linux), 39
+system load, 368
+T
+table-table joins, 398
+tables, 389
+converting to/from streams, 389, 407
+stream-table joins, 396
+tasks, 211
+connectors and, 226
+for connector associated with MirrorMaker,
+250
+in Kafka Streams, 412
+responsibilities of, 226
+stream processing application requiring
+repartitioning, 414
+stream processing, running on multiple
+threads and servers, 413
+tasks.max parameter, 257
+TCP buffer size, tuning, 257
+TestContainers framework, 412
+testing
+in Kafka Streams applications, 411
+test suite in Apache Kafka source reposi‐
+tory, 177
+tools for, 335
+using MockAdminClient, 131-133
+validating applications, 177
+third-party clients, 48
+thread pools for handling client requests, 355
+thread safety (consumer poll loop), 87
+Thrift, 62
+throttling
+of client requests, 74, 376
+partition reassignments and, 330
+of replication with quotas, 129
+uneven behavior in poorly balanced clus‐
+ters, 317
+using max.connections parameters, 319
+throughput
+considerations in determining number of
+replicas per topic, 165
+high and varying, in data pipelines, 205
+tiered storage, 149
+documentation in KIP-405, 150
+performance improvements from, 150
+time in stream processing, 386
+being mindful of time zones, 388

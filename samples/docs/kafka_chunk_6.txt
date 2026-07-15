@@ -1,0 +1,200 @@
+Messaging
+Kafka is also used for messaging, where applications need to send notifications (such
+as emails) to users. Those applications can produce messages without needing to be
+concerned about formatting or how the messages will actually be sent. A single appli‐
+cation can then read all the messages to be sent and handle them consistently,
+including:
+• Formatting the messages (also known as decorating) using a common look and
+feel
+• Collecting multiple messages into a single notification to be sent
+• Applying a user’s preferences for how they want to receive messages
+Using a single application for this avoids the need to duplicate functionality in multi‐
+ple applications, as well as allows operations like aggregation that would not other‐
+wise be possible.
+Metrics and logging
+Kafka is also ideal for collecting application and system metrics and logs. This is a use
+case in which the ability to have multiple applications producing the same type of
+message shines. Applications publish metrics on a regular basis to a Kafka topic, and
+those metrics can be consumed by systems for monitoring and alerting. They can also
+be used in an offline system like Hadoop to perform longer-term analysis, such as
+growth projections. Log messages can be published in the same way and can be
+routed to dedicated log search systems like Elasticsearch or security analysis applica‐
+tions. Another added benefit of Kafka is that when the destination system needs to
+change (e.g., it’s time to update the log storage system), there is no need to alter the
+frontend applications or the means of aggregation.
+Commit log
+Since Kafka is based on the concept of a commit log, database changes can be pub‐
+lished to Kafka, and applications can easily monitor this stream to receive live
+updates as they happen. This changelog stream can also be used for replicating data‐
+base updates to a remote system, or for consolidating changes from multiple applica‐
+tions into a single database view. Durable retention is useful here for providing a
+buffer for the changelog, meaning it can be replayed in the event of a failure of the
+The Data Ecosystem | 13
+
+=== PAGE 43 ===
+consuming applications. Alternately, log-compacted topics can be used to provide
+longer retention by only retaining a single change per key.
+Stream processing
+Another area that provides numerous types of applications is stream processing.
+While almost all usage of Kafka can be thought of as stream processing, the term is
+typically used to refer to applications that provide similar functionality to map/reduce
+processing in Hadoop. Hadoop usually relies on aggregation of data over a long time
+frame, either hours or days. Stream processing operates on data in real time, as
+quickly as messages are produced. Stream frameworks allow users to write small
+applications to operate on Kafka messages, performing tasks such as counting met‐
+rics, partitioning messages for efficient processing by other applications, or trans‐
+forming messages using data from multiple sources. Stream processing is covered in
+Chapter 14.
+Kafka’s Origin
+Kafka was created to address the data pipeline problem at LinkedIn.  It was designed
+to provide a high-performance messaging system that can handle many types of data
+and provide clean, structured data about user activity and system metrics in real time.
+Data really powers everything that we do.
+—Jeff Weiner, former CEO of LinkedIn
+LinkedIn’s Problem
+Similar to the example described at the beginning of this chapter, LinkedIn had a sys‐
+tem for collecting system and application metrics that used custom collectors and
+open source tools for storing and presenting data internally. In addition to traditional
+metrics, such as CPU usage and application performance, there was a sophisticated
+request-tracing feature that used the monitoring system and could provide introspec‐
+tion into how a single user request propagated through internal applications. The
+monitoring system had many faults, however. This included metrics collection based
+on polling, large intervals between metrics, and no ability for application owners to
+manage their own metrics. The system was high-touch, requiring human interven‐
+tion for most simple tasks, and inconsistent, with differing metric names for the same
+measurement across different systems.
+At the same time, there was a system created for tracking user activity information.
+This was an HTTP service that frontend servers would connect to periodically and
+publish a batch of messages (in XML format) to the HTTP service. These batches
+were then moved to offline processing platforms, which is where the files were parsed
+and collated. This system had many faults. The XML formatting was inconsistent,
+14 | Chapter 1: Meet Kafka
+
+=== PAGE 44 ===
+and parsing it was computationally expensive. Changing the type of user activity that
+was tracked required a significant amount of coordinated work between frontends
+and offline processing. Even then, the system would break constantly due to changing
+schemas. Tracking was built on hourly batching, so it could not be used in real time.
+Monitoring and user-activity tracking could not use the same backend service. The
+monitoring service was too clunky, the data format was not oriented for activity
+tracking, and the polling model for monitoring was not compatible with the push
+model for tracking. At the same time, the tracking service was too fragile to use for
+metrics, and the batch-oriented processing was not the right model for real-time
+monitoring and alerting. However, the monitoring and tracking data shared many
+traits, and correlation of the information (such as how specific types of user activity
+affected application performance) was highly desirable. A drop in specific types of
+user activity could indicate problems with the application that serviced it, but hours
+of delay in processing activity batches meant a slow response to these types of issues.
+At first, existing off-the-shelf open source solutions were thoroughly investigated to
+find a new system that would provide real-time access to the data and scale out to
+handle the amount of message traffic needed. Prototype systems were set up using
+ActiveMQ, but at the time it could not handle the scale. It was also a fragile solution
+for the way LinkedIn needed to use it, discovering many flaws in ActiveMQ that
+would cause the brokers to pause. These pauses would back up connections to clients
+and interfere with the ability of the applications to serve requests to users. The deci‐
+sion was made to move forward with a custom infrastructure for the data pipeline.
+The Birth of Kafka
+The development team at LinkedIn was led by Jay Kreps, a principal software engi‐
+neer who was previously responsible for the development and open source release of
+Voldemort, a distributed key-value storage system. The initial team also included
+Neha Narkhede and, later, Jun Rao. Together, they set out to create a messaging sys‐
+tem that could meet the needs of both the monitoring and tracking systems, and scale
+for the future. The primary goals were to:
+• Decouple producers and consumers by using a push-pull model
+• Provide persistence for message data within the messaging system to allow multi‐
+ple consumers
+• Optimize for high throughput of messages
+• Allow for horizontal scaling of the system to grow as the data streams grew
+The result was a publish/subscribe messaging system that had an interface typical of
+messaging systems but a storage layer more like a log-aggregation system. Combined
+with the adoption of Apache Avro for message serialization, Kafka was effective for
+Kafka’s Origin | 15
+
+=== PAGE 45 ===
+handling both metrics and user-activity tracking at a scale of billions of messages per
+day. The scalability of Kafka has helped LinkedIn’s usage grow in excess of seven tril‐
+lion messages produced (as of February 2020) and over five petabytes of data con‐
+sumed daily.
+Open Source
+Kafka was released as an open source project on GitHub in late 2010. As it started to
+gain attention in the open source community, it was proposed and accepted as an
+Apache Software Foundation incubator project in July of 2011. Apache Kafka gradu‐
+ated from the incubator in October of 2012. Since then, it has continuously been
+worked on and has found a robust community of contributors and committers out‐
+side of LinkedIn. Kafka is now used in some of the largest data pipelines in the world,
+including those at Netflix, Uber, and many other companies.
+Widespread adoption of Kafka has created a healthy ecosystem around the core
+project as well. There are active meetup groups in dozens of countries around the
+world, providing local discussion and support of stream processing. There are also
+numerous open source projects related to Apache Kafka. LinkedIn continues to
+maintain several, including Cruise Control, Kafka Monitor, and Burrow. In addition
+to its commercial offerings, Confluent has released projects including ksqlDB, a
+schema registry, and a REST proxy under a community license (which is not strictly
+open source, as it includes use restrictions). Several of the most popular projects are
+listed in Appendix B.
+Commercial Engagement
+In the fall of 2014, Jay Kreps, Neha Narkhede, and Jun Rao left LinkedIn to found
+Confluent, a company centered around providing development, enterprise support,
+and training for Apache Kafka. They also joined other companies (such as Heroku) in
+providing cloud services for Kafka. Confluent, through a partnership with Google,
+provides managed Kafka clusters on Google Cloud Platform, as well as similar serv‐
+ices on Amazon Web Services and Azure. One of the other major initiatives of Con‐
+fluent is to organize the Kafka Summit conference series. Started in 2016, with
+conferences held annually in the United States and London, Kafka Summit provides a
+place for the community to come together on a global scale and share knowledge
+about Apache Kafka and related projects.
+16 | Chapter 1: Meet Kafka
+
+=== PAGE 46 ===
+The Name
+People often ask how Kafka got its name and if it signifies anything specific about the
+application itself. Jay Kreps offered the following insight:
+I thought that since Kafka was a system optimized for writing, using a writer’s name
+would make sense. I had taken a lot of lit classes in college and liked Franz Kafka. Plus
+the name sounded cool for an open source project.
+So basically there is not much of a relationship.
+Getting Started with Kafka
+Now that we know all about Kafka and its history, we can set it up and build our own
+data pipeline. In the next chapter, we will explore installing and configuring Kafka.
+We will also cover selecting the right hardware to run Kafka on, and some things to
+keep in mind when moving to production operations.
+Getting Started with Kafka | 17
+
+=== PAGE 48 ===
+CHAPTER 2
+Installing Kafka
+This chapter describes how to get started with the Apache Kafka broker, including
+how to set up Apache ZooKeeper, which is used by Kafka for storing metadata for the
+brokers. The chapter will also cover basic configuration options for Kafka deploy‐
+ments, as well as some suggestions for selecting the correct hardware to run the brok‐
+ers on. Finally, we cover how to install multiple Kafka brokers as part of a single
+cluster and things you should know when using Kafka in a production environment.
+Environment Setup
+Before using Apache Kafka, your environment needs to be set up with a few prerequi‐
+sites to ensure it runs properly. The following sections will guide you through that
+process.
+Choosing an Operating System
+Apache Kafka is a Java application and can run on many operating systems. While
+Kafka is capable of being run on many OSs, including Windows, macOS, Linux, and
+others, Linux is the recommended OS for the general use case.  The installation steps
+in this chapter will focus on setting up and using Kafka in a Linux environment. For
+information on installing Kafka on Windows and macOS, see Appendix A.
+Installing Java
+Prior to installing either ZooKeeper or Kafka, you will need a Java environment set
+up and functioning. Kafka and ZooKeeper work well with all OpenJDK-based Java
+implementations, including Oracle JDK. The latest versions of Kafka support both
+Java 8 and Java 11. The exact version installed can be the version provided by your OS
+or one directly downloaded from the web—for example, the Oracle website for the
+19
+
+=== PAGE 49 ===
+Oracle version . Though ZooKeeper and Kafka will work with a runtime edition of
+Java, it is recommended when developing tools and applications to have the full Java
+Development Kit (JDK). It is recommended to install the latest released patch version
+of your Java environment, as older versions may have security vulnerabilities. The
+installation steps will assume you have installed JDK version 11 update 10 deployed
+at /usr/java/jdk-11.0.10.
+Installing ZooKeeper
+Apache Kafka uses Apache ZooKeeper to store metadata about the Kafka cluster, as
+well as consumer client details, as shown in Figure 2-1 . ZooKeeper is a centralized
+service for maintaining configuration information, naming, providing distributed

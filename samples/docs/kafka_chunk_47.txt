@@ -1,0 +1,200 @@
+need to know how to deal with this situation. Do we pick one event as the “cor‐
+rect” one? If so, we need consistent rules on how to pick one event so applications
+on both datacenters will arrive at the same conclusion. Do we decide that both
+are true and simply send the user two books and have another department deal
+with returns? Amazon used to resolve conflicts that way, but organizations deal‐
+ing with stock trades, for example, can’t. The specific method for minimizing
+conflicts and handling them when they occur is specific to each use case. It is
+important to keep in mind that if you use this architecture, you will have conflicts
+and will need to deal with them.
+If you find ways to handle the challenges of asynchronous reads and writes to the
+same dataset from multiple locations, then this architecture is highly recommended.
+It is the most scalable, resilient, flexible, and cost-effective option we are aware of. So,
+it is well worth the effort to figure out solutions for avoiding replication cycles, keep‐
+ing users mostly in the same datacenter, and handling conflicts when they occur.
+Part of the challenge of active-active mirroring, especially with more than two data‐
+centers, is that you will need mirroring tasks for each pair of datacenters and each
+direction. Many mirroring tools these days can share processes, for example, using
+the same process for all mirroring to a destination cluster.
+In addition, you will want to avoid loops in which the same event is mirrored back
+and forth endlessly. Y ou can do this by giving each “logical topic” a separate topic for
+each datacenter and making sure to avoid replicating topics that originated in remote
+datacenters. For example, logical topic users will be topic SF.users in one datacenter
+and NYC.users in another datacenter. The mirroring processes will mirror topic
+SF.users from SF to NYC and topic NYC.users from NYC to SF . As a result, each event
+will only be mirrored once, but each datacenter will contain both SF.users and
+NYC.users, which means each datacenter will have information for all the users. Con‐
+sumers will need to consume events from *.users if they wish to consume all user
+events. Another way to think of this setup is to see it as a separate namespace for each
+datacenter that contains all the topics for the specific datacenter. In our example, we’ll
+Multicluster Architectures | 239
+
+=== PAGE 269 ===
+have the NYC and the SF namespaces. Some mirroring tools like MirrorMaker pre‐
+vent replication cycles using a similar naming convention.
+Record headers introduced in Apache Kafka in version 0.11.0 enable events to be tag‐
+ged with their originating datacenter. Header information may also be used to avoid
+endless mirroring loops and to allow processing events from different datacenters
+separately. Y ou can also implement this feature by using a structured data format for
+the record values (Avro is our favorite example) and use this to include tags and
+headers in the event itself. However, this does require extra effort when mirroring,
+since none of the existing mirroring tools will support your specific header format.
+Active-Standby Architecture
+In some cases, the only requirement for multiple clusters is to support some kind of
+disaster scenario. Perhaps you have two clusters in the same datacenter. Y ou use one
+cluster for all the applications, but you want a second cluster that contains (almost)
+all the events in the original cluster that you can use if the original cluster is com‐
+pletely unavailable. Or perhaps you need geographic resiliency. Y our entire business is
+running from a datacenter in California, but you need a second datacenter in Texas
+that usually doesn’t do much and that you can use in case of an earthquake. The Texas
+datacenter will probably have an inactive (“cold”) copy of all the applications that
+admins can start up in case of emergency and that will use the second cluster
+(Figure 10-4). This is often a legal requirement rather than something that the busi‐
+ness is actually planning on doing—but you still need to be ready.
+Figure 10-4. The active-standby architecture
+The benefits of this setup are simplicity in setup and the fact that it can be used in
+pretty much any use case. Y ou simply install a second cluster and set up a mirroring
+process that streams all the events from one cluster to another. No need to worry
+about access to data, handling conflicts, and other architectural complexities.
+The disadvantages are waste of a good cluster and the fact that failover between Kafka
+clusters is, in fact, much harder than it looks. The bottom line is that it is currently
+not possible to perform cluster failover in Kafka without either losing data or having
+duplicate events. Often both. Y ou can minimize them but never fully eliminate them.
+240 | Chapter 10: Cross-Cluster Data Mirroring
+
+=== PAGE 270 ===
+It should be obvious that a cluster that does nothing except wait around for a disaster
+is a waste of resources. Since disasters are (or should be) rare, most of the time we are
+looking at a cluster of machines that does nothing at all. Some organizations try to
+fight this issue by having a DR (disaster recovery) cluster that is much smaller than
+the production cluster. But this is a risky decision because you can’t be sure that this
+minimally sized cluster will hold up during an emergency. Other organizations prefer
+to make the cluster useful during nondisasters by shifting some read-only workloads
+to run on the DR cluster, which means they are really running a small version of a
+hub-and-spoke architecture with a single spoke.
+The more serious issue is, how do you failover to a DR cluster in Apache Kafka?
+First, it should go without saying that whichever failover method you choose, your
+SRE team must practice it on a regular basis. A plan that works today may stop work‐
+ing after an upgrade, or perhaps new use cases make the existing tooling obsolete.
+Once a quarter is usually the bare minimum for failover practices. Strong SRE teams
+practice far more frequently. Netflix’s famous Chaos Monkey, a service that randomly
+causes disasters, is the extreme—any day may become failover practice day.
+Now, let’s take a look at what is involved in a failover.
+Disaster recovery planning
+When planning for disaster recovery, it is important to consider two key metrics.
+Recovery time objective (RTO) defines the maximum amount of time before all serv‐
+ices must resume after a disaster. Recovery point objective (RPO) defines the maxi‐
+mum amount of time for which data may be lost as a result of a disaster. The lower
+the RTO, the more important it is to avoid manual processes and application restarts,
+since very low RTO can be achieved only with automated failover. Low RPO requires
+real-time mirroring with low latencies, and RPO=0 requires synchronous replication.
+Data loss and inconsistencies in unplanned failover
+Because Kafka’s various mirroring solutions are all asynchronous (we’ll discuss a syn‐
+chronous solution in the next section), the DR cluster will not have the latest mes‐
+sages from the primary cluster. Y ou should always monitor how far behind the DR
+cluster is and never let it fall too far behind. But in a busy system you should expect
+the DR cluster to be a few hundred or even a few thousand messages behind the pri‐
+mary. If your Kafka cluster handles 1 million messages a second and the lag between
+the primary and the DR cluster is 5 milliseconds, your DR cluster will be 5,000 mes‐
+sages behind the primary in the best-case scenario. So, prepare for unplanned failover
+to include some data loss. In planned failover, you can stop the primary cluster and
+wait for the mirroring process to mirror the remaining messages before failing over
+applications to the DR cluster, thus avoiding this data loss. When unplanned failover
+occurs and you lose a few thousand messages, note that mirroring solutions currently
+Multicluster Architectures | 241
+
+=== PAGE 271 ===
+don’t support transactions, which means that if some events in multiple topics are
+related to each other (e.g., sales and line items), you can have some events arrive to
+the DR site in time for the failover and others that don’t. Y our applications will need
+to be able to handle a line item without a corresponding sale after you failover to the
+DR cluster.
+Start offset for applications after failover
+One of the challenging tasks in failing over to another cluster is making sure applica‐
+tions know where to start consuming data. There are several common approaches.
+Some are simple but can cause additional data loss or duplicate processing; others are
+more involved but minimize additional data loss and reprocessing. Let’s take a look at
+a few:
+Auto offset reset
+Apache Kafka consumers have a configuration for how to behave when they
+don’t have a previously committed offset—they either start reading from the
+beginning of the partition or from the end of the partition. If you are not some‐
+how mirroring these offsets as part of the DR plan, you need to choose one of
+these options. Either start reading from the beginning of available data and han‐
+dle large amounts of duplicates or skip to the end and miss an unknown (and
+hopefully small) number of events. If your application handles duplicates with no
+issues, or missing some data is no big deal, this option is by far the easiest. Simply
+skipping to the end of the topic on failover is a popular failover method due to its
+simplicity.
+Replicate offsets topic
+If you are using Kafka consumers from version 0.9.0 and later, the consumers
+will commit their offsets to a special topic: __consumer_offsets. If you mirror
+this topic to your DR cluster, when consumers start consuming from the DR
+cluster, they will be able to pick up their old offsets and continue from where they
+left off. It is simple, but there is a long list of caveats involved.
+First, there is no guarantee that offsets in the primary cluster will match those in
+the secondary cluster. Suppose you only store data in the primary cluster for
+three days and you start mirroring a topic a week after it was created. In this case,
+the first offset available in the primary cluster may be offset 57,000,000 (older
+events were from the first 4 days and were removed already), but the first offset
+in the DR cluster will be 0. So, a consumer that tries to read offset 57,000,003
+(because that’s its next event to read) from the DR cluster will fail to do this.
+Second, even if you started mirroring immediately when the topic was first cre‐
+ated and both the primary and the DR topics start with 0, producer retries can
+cause offsets to diverge. We discuss an alternative mirroring solution that pre‐
+serves offsets between primary and DR clusters at the end of this chapter.
+242 | Chapter 10: Cross-Cluster Data Mirroring
+
+=== PAGE 272 ===
+Third, even if the offsets were perfectly preserved, because of the lag between pri‐
+mary and DR clusters and because mirroring solutions currently don’t support
+transactions, an offset committed by a Kafka consumer may arrive ahead or
+behind the record with this offset. A consumer that fails over may find commit‐
+ted offsets without matching records. Or it may find that the latest committed
+offset in the DR site is older than the latest committed offset in the primary site.
+See Figure 10-5.
+Figure 10-5. A failover causes committed offsets without matching records
+In these cases, you need to accept some duplicates if the latest committed offset
+in the DR site is older than the one committed on the primary or if the offsets in
+the records in the DR site are ahead of the primary due to retries. Y ou will also
+need to figure out how to handle cases where the latest committed offset in the
+DR site doesn’t have a matching record—do you start processing from the begin‐
+ning of the topic or skip to the end?
+As you can see, this approach has its limitations. Still, this option lets you failover
+to another DR with a reduced number of duplicated or missing events compared
+to other approaches while still being simple to implement.
+Time-based failover
+From version 0.10.0 onward, each message includes a timestamp indicating the
+time the message was sent to Kafka. From 0.10.1.0 onward, brokers include an
+index and an API for looking up offsets by the timestamp. So, if you failover to
+the DR cluster and you know that your trouble started at 4:05 a.m., you can tell
+consumers to start processing data from 4:03 a.m. There will be some duplicates
+from those two minutes, but it is probably better than other alternatives and the
+behavior is much easier to explain to everyone in the company—“We failed back
+to 4:03 a.m. ” sounds better than “We failed back to what may or may not be the
+Multicluster Architectures | 243
+
+=== PAGE 273 ===
+latest committed offsets. ” So, this is often a good compromise. The only question
+is: how do we tell consumers to start processing data from 4:03 a.m.?
+One option is to bake it right into your app. Have a user-configurable option to
+specify the start time for the app. If this is configured, the app can use the new
+APIs to fetch offset by time, seek to that time, and start consuming from the right
+point, committing offsets as usual.
+This option is great if you wrote all your applications this way in advance. But
+what if you didn’t? Apache Kafka provides the kafka-consumer-groups tool to
+reset offsets based on a range of options, including timestamp-based reset added
+in 0.11.0. The consumer group should be stopped while running this type of tool
+and started immediately after. For example, the following command resets con‐
+sumer offsets for all topics belonging to a particular group to a specific time:
+bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --reset-
+offsets --all-topics --group my-group --to-datetime 
+2021-03-31T04:03:00.000 --execute
+This option is recommended in deployments that need to guarantee a level of
+certainty in their failover.
+Offset translation
+When discussing mirroring the offsets topic, one of the biggest challenges is the
+fact that offsets in primary and DR clusters can diverge. In the past, some organi‐
+zations chose to use an external data store, such as Apache Cassandra, to store
+mapping of offsets from one cluster to another. Whenever an event is produced
+to the DR cluster, both offsets are sent to the external data store by the mirroring

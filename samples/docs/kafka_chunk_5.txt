@@ -1,0 +1,200 @@
+partitions. This represents a single stream of data moving from the producers to the
+consumers. This way of referring to messages is most common when discussing
+stream processing, which is when frameworks—some of which are Kafka Streams,
+Apache Samza, and Storm—operate on the messages in real time. This method of
+operation can be compared to the way offline frameworks, namely Hadoop, are
+designed to work on bulk data at a later time. An overview of stream processing is
+provided in Chapter 14.
+Producers and Consumers
+Kafka clients are users of the system, and there are two basic types: producers and
+consumers. There are also advanced client APIs—Kafka Connect API for data inte‐
+gration and Kafka Streams for stream processing. The advanced clients use producers
+and consumers as building blocks and provide higher-level functionality on top.
+Producers create new messages. In other publish/subscribe systems, these may be
+called publishers or writers. A message will be produced to a specific topic. By default,
+the producer will balance messages over all partitions of a topic evenly. In some cases,
+the producer will direct messages to specific partitions. This is typically done using
+the message key and a partitioner that will generate a hash of the key and map it to a
+specific partition. This ensures that all messages produced with a given key will get
+written to the same partition. The producer could also use a custom partitioner that
+6 | Chapter 1: Meet Kafka
+
+=== PAGE 36 ===
+follows other business rules for mapping messages to partitions. Producers are cov‐
+ered in more detail in Chapter 3.
+Consumers read messages. In other publish/subscribe systems, these clients may be
+called subscribers or readers. The consumer subscribes to one or more topics and
+reads the messages in the order in which they were produced to each partition. The
+consumer keeps track of which messages it has already consumed by keeping track of
+the offset of messages. The offset—an integer value that continually increases—is
+another piece of metadata that Kafka adds to each message as it is produced. Each
+message in a given partition has a unique offset, and the following message has a
+greater offset (though not necessarily monotonically greater). By storing the next pos‐
+sible offset for each partition, typically in Kafka itself, a consumer can stop and
+restart without losing its place.
+Consumers work as part of a consumer group, which is one or more consumers that
+work together to consume a topic. The group ensures that each partition is only con‐
+sumed by one member. In Figure 1-6 , there are three consumers in a single group
+consuming a topic. Two of the consumers are working from one partition each, while
+the third consumer is working from two partitions. The mapping of a consumer to a
+partition is often called ownership of the partition by the consumer.
+In this way, consumers can horizontally scale to consume topics with a large number
+of messages. Additionally, if a single consumer fails, the remaining members of the
+group will reassign the partitions being consumed to take over for the missing mem‐
+ber. Consumers and consumer groups are discussed in more detail in Chapter 4.
+Figure 1-6. A consumer group reading from a topic
+Enter Kafka | 7
+
+=== PAGE 37 ===
+Brokers and Clusters
+A single Kafka server is called a broker. The broker receives messages from producers,
+assigns offsets to them, and writes the messages to storage on disk. It also services
+consumers, responding to fetch requests for partitions and responding with the
+messages that have been published. Depending on the specific hardware and its per‐
+formance characteristics, a single broker can easily handle thousands of partitions
+and millions of messages per second.
+Kafka brokers are designed to operate as part of a cluster. Within a cluster of brokers,
+one broker will also function as the cluster controller (elected automatically from the
+live members of the cluster). The controller is responsible for administrative opera‐
+tions, including assigning partitions to brokers and monitoring for broker failures. A
+partition is owned by a single broker in the cluster, and that broker is called the leader
+of the partition. A replicated partition (as seen in Figure 1-7) is assigned to additional
+brokers, called followers of the partition. Replication provides redundancy of mes‐
+sages in the partition, such that one of the followers can take over leadership if there
+is a broker failure. All producers must connect to the leader in order to publish mes‐
+sages, but consumers may fetch from either the leader or one of the followers. Cluster
+operations, including partition replication, are covered in detail in Chapter 7.
+Figure 1-7. Replication of partitions in a cluster
+A key feature of Apache Kafka is that of retention, which is the durable storage of
+messages for some period of time. Kafka brokers are configured with a default reten‐
+tion setting for topics, either retaining messages for some period of time (e.g., 7 days)
+or until the partition reaches a certain size in bytes (e.g., 1 GB). Once these limits are
+reached, messages are expired and deleted. In this way, the retention configuration
+8 | Chapter 1: Meet Kafka
+
+=== PAGE 38 ===
+defines a minimum amount of data available at any time. Individual topics can also
+be configured with their own retention settings so that messages are stored for only as
+long as they are useful. For example, a tracking topic might be retained for several
+days, whereas application metrics might be retained for only a few hours. Topics can
+also be configured as log compacted, which means that Kafka will retain only the last
+message produced with a specific key. This can be useful for changelog-type data,
+where only the last update is interesting.
+Multiple Clusters
+As Kafka deployments grow, it is often advantageous to have multiple clusters. There
+are several reasons why this can be useful:
+• Segregation of types of data
+• Isolation for security requirements
+• Multiple datacenters (disaster recovery)
+When working with multiple datacenters in particular, it is often required that mes‐
+sages be copied between them. In this way, online applications can have access to user
+activity at both sites. For example, if a user changes public information in their pro‐
+file, that change will need to be visible regardless of the datacenter in which search
+results are displayed. Or, monitoring data can be collected from many sites into a sin‐
+gle central location where the analysis and alerting systems are hosted. The replica‐
+tion mechanisms within the Kafka clusters are designed only to work within a single
+cluster, not between multiple clusters.
+The Kafka project includes a tool called MirrorMaker, used for replicating data to
+other clusters. At its core, MirrorMaker is simply a Kafka consumer and producer,
+linked together with a queue. Messages are consumed from one Kafka cluster and
+produced to another. Figure 1-8 shows an example of an architecture that uses Mir‐
+rorMaker, aggregating messages from two local clusters into an aggregate cluster and
+then copying that cluster to other datacenters. The simple nature of the application
+belies its power in creating sophisticated data pipelines, which will be detailed further
+in Chapter 9.
+Enter Kafka | 9
+
+=== PAGE 39 ===
+Figure 1-8. Multiple datacenters architecture
+Why Kafka?
+There are many choices for publish/subscribe messaging systems, so what makes
+Apache Kafka a good choice?
+Multiple Producers
+Kafka is able to seamlessly handle multiple producers, whether those clients are using
+many topics or the same topic. This makes the system ideal for aggregating data from
+many frontend systems and making it consistent. For example, a site that serves con‐
+tent to users via a number of microservices can have a single topic for page views that
+all services can write to using a common format. Consumer applications can then
+receive a single stream of page views for all applications on the site without having to
+coordinate consuming from multiple topics, one for each application.
+Multiple Consumers
+In addition to multiple producers, Kafka is designed for multiple consumers to read
+any single stream of messages without interfering with each other client. This is in
+contrast to many queuing systems where once a message is consumed by one client, it
+is not available to any other. Multiple Kafka consumers can choose to operate as part
+of a group and share a stream, assuring that the entire group processes a given mes‐
+sage only once.
+10 | Chapter 1: Meet Kafka
+
+=== PAGE 40 ===
+Disk-Based Retention
+Not only can Kafka handle multiple consumers, but durable message retention means
+that consumers do not always need to work in real time.  Messages are written to disk
+and will be stored with configurable retention rules. These options can be selected on
+a per-topic basis, allowing for different streams of messages to have different amounts
+of retention depending on the consumer needs. Durable retention means that if a
+consumer falls behind, either due to slow processing or a burst in traffic, there is no
+danger of losing data. It also means that maintenance can be performed on consum‐
+ers, taking applications offline for a short period of time, with no concern about mes‐
+sages backing up on the producer or getting lost. Consumers can be stopped, and the
+messages will be retained in Kafka. This allows them to restart and pick up processing
+messages where they left off with no data loss.
+Scalable
+Kafka’s flexible scalability makes it easy to handle any amount of data. Users can start
+with a single broker as a proof of concept, expand to a small development cluster of
+three brokers, and move into production with a larger cluster of tens or even hun‐
+dreds of brokers that grows over time as the data scales up. Expansions can be per‐
+formed while the cluster is online, with no impact on the availability of the system as
+a whole. This also means that a cluster of multiple brokers can handle the failure of
+an individual broker and continue servicing clients. Clusters that need to tolerate
+more simultaneous failures can be configured with higher replication factors. Repli‐
+cation is discussed in more detail in Chapter 7.
+High Performance
+All of these features come together to make Apache Kafka a publish/subscribe mes‐
+saging system with excellent performance under high load. Producers, consumers,
+and brokers can all be scaled out to handle very large message streams with ease. This
+can be done while still providing subsecond message latency from producing a mes‐
+sage to availability to consumers.
+Platform Features
+The core Apache Kafka project has also added some streaming platform features that
+can make it much easier for developers to perform common types of work. While not
+full platforms, which typically include a structured runtime environment like YARN,
+these features are in the form of APIs and libraries that provide a solid foundation to
+build on and flexibility as to where they can be run. Kafka Connect assists with the
+task of pulling data from a source data system and pushing it into Kafka, or pulling
+data from Kafka and pushing it into a sink data system. Kafka Streams provides a
+library for easily developing stream processing applications that are scalable and fault
+Why Kafka? | 11
+
+=== PAGE 41 ===
+tolerant. Connect is discussed in Chapter 9, while Streams is covered in great detail in
+Chapter 14.
+The Data Ecosystem
+Many applications participate in the environments we build for data processing. We
+have defined inputs in the form of applications that create data or otherwise intro‐
+duce it to the system. We have defined outputs in the form of metrics, reports, and
+other data products. We create loops, with some components reading data from the
+system, transforming it using data from other sources, and then introducing it back
+into the data infrastructure to be used elsewhere. This is done for numerous types of
+data, with each having unique qualities of content, size, and usage.
+Apache Kafka provides the circulatory system for the data ecosystem, as shown in
+Figure 1-9 . It carries messages between the various members of the infrastructure,
+providing a consistent interface for all clients. When coupled with a system to pro‐
+vide message schemas, producers and consumers no longer require tight coupling or
+direct connections of any sort. Components can be added and removed as business
+cases are created and dissolved, and producers do not need to be concerned about
+who is using the data or the number of consuming applications.
+Figure 1-9. A big data ecosystem
+Use Cases
+Activity tracking
+The original use case for Kafka, as it was designed at LinkedIn, is that of user activity
+tracking. A website’s users interact with frontend applications, which generate mes‐
+sages regarding actions the user is taking. This can be passive information, such as
+12 | Chapter 1: Meet Kafka
+
+=== PAGE 42 ===
+page views and click tracking, or it can be more complex actions, such as information
+that a user adds to their profile. The messages are published to one or more topics,
+which are then consumed by applications on the backend. These applications may be
+generating reports, feeding machine learning systems, updating search results, or per‐
+forming other operations that are necessary to provide a rich user experience.

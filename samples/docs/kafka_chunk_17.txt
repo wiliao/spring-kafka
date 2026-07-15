@@ -1,0 +1,200 @@
+1. Add your jar to the classpath:
+export CLASSPATH=$CLASSPATH:~./target/CountProducerInterceptor-1.0-
+SNAPSHOT.jar
+2. Create a config file that includes:
+interceptor.classes=com.shapira.examples.interceptors.CountProducer
+Interceptor counting.interceptor.window.size.ms=10000
+3. Run the application as you normally would, but make sure to include the config‐
+uration that you created in the previous step:
+bin/kafka-console-producer.sh --broker-list localhost:9092 --topic
+interceptor-test --producer.config producer.config
+Quotas and Throttling
+Kafka brokers have the ability to limit the rate at which messages are produced and
+consumed. This is done via the quota mechanism. Kafka has three quota types: pro‐
+duce, consume, and request. Produce and consume quotas limit the rate at which cli‐
+ents can send and receive data, measured in bytes per second.  Request quotas limit
+the percentage of time the broker spends processing client requests.
+Quotas can be applied to all clients by setting default quotas, specific client-ids, spe‐
+cific users, or both. User-specific quotas are only meaningful in clusters where secu‐
+rity is configured and clients authenticate.
+The default produce and consume quotas that are applied to all clients are part of the
+Kafka broker configuration file. For example, to limit each producer to send no more
+than 2 MBps on average, add the following configuration to the broker configuration
+file: quota.producer.default=2M.
+While not recommended, you can also configure specific quotas for certain clients
+that override the default quotas in the broker configuration file. To allow clientA to
+Quotas and Throttling | 73
+
+=== PAGE 103 ===
+produce 4 MBps and clientB 10 MBps, you can use the following: quota.
+producer.override="clientA:4M,clientB:10M"
+Quotas that are specified in Kafka’s configuration file are static, and you can only
+modify them by changing the configuration and then restarting all the brokers. Since
+new clients can arrive at any time, this is very inconvenient. Therefore the usual
+method of applying quotas to specific clients is through dynamic configuration that
+can be set using kafka-config.sh or the AdminClient API.
+Let’s look at few examples:
+bin/kafka-configs  --bootstrap-server localhost:9092 --alter --add-config 'pro-
+ducer_byte_rate=1024' --entity-name clientC --entity-type clients 
+bin/kafka-configs  --bootstrap-server localhost:9092 --alter --add-config 'pro-
+ducer_byte_rate=1024,consumer_byte_rate=2048' --entity-name user1 --entity-type 
+users 
+bin/kafka-configs  --bootstrap-server localhost:9092 --alter --add-config 'con-
+sumer_byte_rate=2048' --entity-type users 
+Limiting clientC (identified by client-id) to produce only 1024 bytes per second
+Limiting user1 (identified by authenticated principal) to produce only 1024 bytes
+per second and consume only 2048 bytes per second.
+Limiting all users to consume only 2048 bytes per second, except users with more
+specific override. This is the way to dynamically modify the default quota.
+When a client reaches its quota, the broker will start throttling the client’s requests to
+prevent it from exceeding the quota. This means that the broker will delay responses
+to client requests; in most clients this will automatically reduce the request rate (since
+the number of in-flight requests is limited) and bring the client traffic down to a level
+allowed by the quota. To protect the broker from misbehaved clients sending addi‐
+tional requests while being throttled, the broker will also mute the communication
+channel with the client for the period of time needed to achieve compliance with the
+quota.
+The throttling behavior is exposed to clients via produce-throttle-time-avg,
+produce-throttle-time-max, fetch-throttle-time-avg, and fetch-throttle-
+time-max, the average and the maximum amount of time a produce request and fetch
+request was delayed due to throttling. Note that this time can represent throttling due
+to produce and consume throughput quotas, request time quotas, or both. Other
+types of client requests can only be throttled due to request time quotas, and those
+will also be exposed via similar metrics.
+74 | Chapter 3: Kafka Producers: Writing Messages to Kafka
+
+=== PAGE 104 ===
+If you use async Producer.send() and continue to send messages
+at a rate that is higher than the rate the broker can accept (whether
+due to quotas or just plain old capacity), the messages will first be
+queued in the client memory. If the rate of sending continues to be
+higher than the rate of accepting messages, the client will eventu‐
+ally run out of buffer space for storing the excess messages and will
+block the next Producer.send() call. If the timeout delay is insuffi‐
+cient to let the broker catch up to the producer and clear some
+space in the buffer, eventually Producer.send() will throw
+TimeoutException. Alternatively, some of the records that were
+already placed in batches will wait for longer than delivery.time
+out.ms and expire, resulting in calling the send() callback with a
+TimeoutException. It is therefore important to plan and monitor
+to make sure that the broker capacity over time will match the rate
+at which producers are sending data.
+Summary
+We began this chapter with a simple example of a producer—just 10 lines of code that
+send events to Kafka. We added to the simple example by adding error handling and
+experimenting with synchronous and asynchronous producing. We then explored the
+most important producer configuration parameters and saw how they modify the
+behavior of the producers. We discussed serializers, which let us control the format of
+the events we write to Kafka. We looked in-depth at Avro, one of many ways to serial‐
+ize events but one that is very commonly used with Kafka. We concluded the chapter
+with a discussion of partitioning in Kafka and an example of an advanced custom
+partitioning technique.
+Now that we know how to write events to Kafka, in Chapter 4 we’ll learn all about
+consuming events from Kafka.
+Summary | 75
+
+=== PAGE 106 ===
+CHAPTER 4
+Kafka Consumers: Reading Data from Kafka
+Applications that need to read data from Kafka use a KafkaConsumer to subscribe to
+Kafka topics and receive messages from these topics. Reading data from Kafka is a bit
+different than reading data from other messaging systems, and there are a few unique
+concepts and ideas involved. It can be difficult to understand how to use the Con‐
+sumer API without understanding these concepts first. We’ll start by explaining some
+of the important concepts, and then we’ll go through some examples that show the
+different ways Consumer APIs can be used to implement applications with varying
+requirements.
+Kafka Consumer Concepts
+To understand how to read data from Kafka, you first need to understand its con‐
+sumers and consumer groups. The following sections cover those concepts.
+Consumers and Consumer Groups
+Suppose you have an application that needs to read messages from a Kafka topic, run
+some validations against them, and write the results to another data store. In this
+case, your application will create a consumer object, subscribe to the appropriate
+topic, and start receiving messages, validating them, and writing the results. This may
+work well for a while, but what if the rate at which producers write messages to the
+topic exceeds the rate at which your application can validate them? If you are limited
+to a single consumer reading and processing the data, your application may fall fur‐
+ther and further behind, unable to keep up with the rate of incoming messages. Obvi‐
+ously there is a need to scale consumption from topics. Just like multiple producers
+can write to the same topic, we need to allow multiple consumers to read from the
+same topic, splitting the data among them.
+77
+
+=== PAGE 107 ===
+Kafka consumers are typically part of a consumer group. When multiple consumers
+are subscribed to a topic and belong to the same consumer group, each consumer in
+the group will receive messages from a different subset of the partitions in the topic.
+Let’s take topic T1 with four partitions. Now suppose we created a new consumer, C1,
+which is the only consumer in group G1, and use it to subscribe to topic T1. Con‐
+sumer C1 will get all messages from all four T1 partitions. See Figure 4-1.
+Figure 4-1. One consumer group with four partitions
+If we add another consumer, C2, to group G1, each consumer will only get messages
+from two partitions. Perhaps messages from partition 0 and 2 go to C1, and messages
+from partitions 1 and 3 go to consumer C2. See Figure 4-2.
+Figure 4-2. Four partitions split to two consumers in a group
+If G1 has four consumers, then each will read messages from a single partition. See
+Figure 4-3.
+78 | Chapter 4: Kafka Consumers: Reading Data from Kafka
+
+=== PAGE 108 ===
+Figure 4-3. Four consumers in a group with one partition each
+If we add more consumers to a single group with a single topic than we have parti‐
+tions, some of the consumers will be idle and get no messages at all. See Figure 4-4.
+Figure 4-4. More consumers in a group than partitions means idle consumers
+The main way we scale data consumption from a Kafka topic is by adding more con‐
+sumers to a consumer group. It is common for Kafka consumers to do high-latency
+operations such as write to a database or a time-consuming computation on the data.
+In these cases, a single consumer can’t possibly keep up with the rate data flows into a
+topic, and adding more consumers that share the load by having each consumer own
+just a subset of the partitions and messages is our main method of scaling. This is a
+good reason to create topics with a large number of partitions—it allows adding more
+consumers when the load increases. Keep in mind that there is no point in adding
+more consumers than you have partitions in a topic—some of the consumers will just
+be idle. Chapter 2 includes some suggestions on how to choose the number of parti‐
+tions in a topic.
+In addition to adding consumers in order to scale a single application, it is very com‐
+mon to have multiple applications that need to read data from the same topic. In fact,
+one of the main design goals in Kafka was to make the data produced to Kafka topics
+Kafka Consumer Concepts | 79
+
+=== PAGE 109 ===
+available for many use cases throughout the organization. In those cases, we want
+each application to get all of the messages, rather than just a subset. To make sure an
+application gets all the messages in a topic, ensure the application has its own con‐
+sumer group. Unlike many traditional messaging systems, Kafka scales to a large
+number of consumers and consumer groups without reducing performance.
+In the previous example, if we add a new consumer group (G2) with a single con‐
+sumer, this consumer will get all the messages in topic T1 independent of what G1 is
+doing. G2 can have more than a single consumer, in which case they will each get a
+subset of partitions, just like we showed for G1, but G2 as a whole will still get all the
+messages regardless of other consumer groups. See Figure 4-5.
+Figure 4-5. Adding a new consumer group, both groups receive all messages
+To summarize, you create a new consumer group for each application that needs all
+the messages from one or more topics. Y ou add consumers to an existing consumer
+group to scale the reading and processing of messages from the topics, so each addi‐
+tional consumer in a group will only get a subset of the messages.
+Consumer Groups and Partition Rebalance
+As we saw in the previous section, consumers in a consumer group share ownership
+of the partitions in the topics they subscribe to.  When we add a new consumer to the
+group, it starts consuming messages from partitions previously consumed by another
+consumer. The same thing happens when a consumer shuts down or crashes; it leaves
+the group, and the partitions it used to consume will be consumed by one of the
+remaining consumers. Reassignment of partitions to consumers also happens when
+80 | Chapter 4: Kafka Consumers: Reading Data from Kafka
+
+=== PAGE 110 ===
+1 Diagrams by Sophie Blee-Goldman, from her May 2020 blog post, “From Eager to Smarter in Apache Kafka
+Consumer Rebalances”.
+the topics the consumer group is consuming are modified (e.g., if an administrator
+adds new partitions).
+Moving partition ownership from one consumer to another is called a rebalance.
+Rebalances are important because they provide the consumer group with high availa‐
+bility and scalability (allowing us to easily and safely add and remove consumers), but
+in the normal course of events they can be fairly undesirable.
+There are two types of rebalances, depending on the partition assignment strategy
+that the consumer group uses:1
+Eager rebalances
+During an eager rebalance, all consumers stop consuming, give up their owner‐
+ship of all partitions, rejoin the consumer group, and get a brand-new partition
+assignment. This is essentially a short window of unavailability of the entire con‐

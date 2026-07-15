@@ -1,0 +1,200 @@
+
+=== PAGE 316 ===
+integer, Kafka brokers determine the session lifetime for SASL connections and
+inform clients of this lifetime during the SASL handshake. Session lifetime is the
+lower of the remaining lifetime of the credential or connections.max.reauth.ms.
+Any connection that doesn’t reauthenticate within this interval is terminated by the
+broker. Clients perform reauthentication using the latest credentials acquired by the
+background login thread or injected using custom callbacks. Reauthentication can be
+used to tighten security in several scenarios:
+• For SASL mechanisms like GSSAPI and OAUTHBEARER that use credentials
+with a limited lifetime, reauthentication guarantees that all active connections are
+associated with valid credentials. Short-lived credentials limit exposure in case
+credentials that are compromised.
+• Password-based SASL mechanisms like PLAIN and SCRAM can support pass‐
+word rotation by adding periodic login. Reauthentication limits the amount of
+time requests are processed on connections authenticated with the old password.
+Custom server callback that allows both old and new passwords for a period of
+time can be used to avoid outages until all clients migrate to the new password.
+• connections.max.reauth.ms forces reauthentication in all SASL mechanisms,
+including those with nonexpiring credentials. This limits the amount of time a
+credential may be associated with an active connection after it has been revoked.
+• Connections from clients without SASL reauthentication support are terminated
+on session expiry, forcing the clients to reconnect and authenticate again, thus
+providing the same security guarantees for expired or revoked credentials.
+Compromised Users
+If a user is compromised, action must be taken to remove the
+user from the system as soon as possible. All new connections will
+fail to authenticate with Kafka brokers once the user is removed
+from the authentication server. Existing connections will continue
+to process requests until the next reauthentication timeout. If con
+nections.max.reauth.ms is not configured, no timeout is applied
+and existing connections may continue to use the compromised
+user’s identity for a long time. Kafka does not support SSL renego‐
+tiation due to known vulnerabilities during renegotiation in older
+SSL protocols. Newer protocols like TLSv1.3 do not support rene‐
+gotiation. So, existing SSL connections may continue to use
+revoked or expired certificates. Deny ACLs for the user principal
+can be used to prevent these connections from performing any
+operation. Since ACL changes are applied with very small latencies
+across all brokers, this is the quickest way to disable access for
+compromised users.
+Authentication | 287
+
+=== PAGE 317 ===
+Security Updates Without Downtime
+Kafka deployments need regular maintenance to rotate secrets, apply security fixes,
+and update to the latest security protocols. Many of these maintenance tasks are per‐
+formed using rolling updates where one by one, brokers are shut down and restarted
+with an updated configuration. Some tasks like updating SSL key stores and trust
+stores can be performed using dynamic config updates without restarting brokers.
+When adding a new security protocol to an existing deployment, a new listener can
+be added to brokers with the new protocol while retaining the old listener with the
+old protocol to ensure that client applications can continue to function using the old
+listener during the update. For example, the following sequence can be used to switch
+from PLAINTEXT to SASL_SSL in an existing deployment:
+1. Add a new listener on a new port to each broker using the Kafka configs tool.
+Use a single config update command to update listeners and advertised.
+listeners to include the old listener as well as the new listener, and provide all
+the configuration options for the new SASL_SSL listener with the listener prefix.
+2. Modify all client applications to use the new SASL_SSL listener.
+3. If inter-broker communication is being updated to use the new SASL_SSL lis‐
+tener, perform a rolling update of brokers with the new inter.broker.
+listener.name.
+4. Use the configs tool to remove the old listener from listeners and
+advertised.listeners and to remove any unused configuration options of the
+old listener.
+SASL mechanisms can be added or removed from existing SASL listeners without
+downtime using rolling updates on the same listener port. The following sequence
+switches the mechanism from PLAIN to SCRAM-SHA-256:
+1. Add all existing users to the SCRAM store using the Kafka configs tool.
+2. Set sasl.enabled.mechanisms=PLAIN,SCRAM-SHA-256, configure listener.
+name.<_listener-name_>.scram-sha-256.sasl.jaas.config for the listener,
+and perform a rolling update of brokers.
+3. Modify all client applications to use sasl.mechanism=SCRAM-SHA-256 and update
+sasl.jaas.config to use SCRAM.
+4. If the listener is used for inter-broker communication, use a rolling update of
+brokers to set sasl.mechanism.inter.broker.protocol=SCRAM-SHA-256.
+5. Perform another rolling update of brokers to remove the PLAIN mechanism.
+Set sasl.enabled.mechanisms=SCRAM-SHA-256 and remove listener.name.
+288 | Chapter 11: Securing Kafka
+
+=== PAGE 318 ===
+<listener-name>.plain.sasl.jaas.config and any other configuration
+options for PLAIN.
+Encryption
+Encryption is used to preserve data privacy and data integrity. As we discussed ear‐
+lier, Kafka listeners using SSL and SASL_SSL security protocols use TLS as the trans‐
+port layer, providing secure encrypted channels that protect data transmitted over an
+insecure network. TLS cipher suites can be restricted to strengthen security and
+adhere to security requirements like the Federal Information Processing Standard
+(FIPS).
+Additional measures must be taken to protect data at rest to ensure that sensitive data
+cannot be retrieved even by users with physical access to the disk that stores Kafka
+logs. To avoid security breaches even if the disk is stolen, physical storage can be
+encrypted using whole disk encryption or volume encryption.
+While encryption of transport layer and data storage may provide adequate protec‐
+tion in many deployments, additional protection may be required to avoid granting
+automatic data access to platform administrators. Unencrypted data present in broker
+memory may appear in heap dumps, and administrators with direct access to the disk
+will be able to access these, as well as Kafka logs containing potentially sensitive data.
+In deployments with highly sensitive data or Personally Identifiable Information
+(PII), extra measures are required to preserve data privacy. To comply with regulatory
+requirements, especially in cloud deployments, it is necessary to guarantee that confi‐
+dential data cannot be accessed by platform administrators or cloud providers by any
+means. Custom encryption providers can be plugged into Kafka clients to implement
+end-to-end encryption that guarantees that the entire data flow is encrypted.
+End-to-End Encryption
+In Chapter 3 on Kafka producers, we saw that serializers are used to convert messages
+into the byte array stored in Kafka logs, and in Chapter 4 on Kafka consumers, we
+saw that deserializers converted the byte array back to the message. Serializers and
+deserializers can be integrated with an encryption library to perform encryption of
+the message during serialization, and decryption during deserialization. Message
+encryption is typically performed using symmetric encryption algorithms like AES. A
+shared encryption key stored in a key management system (KMS) enables producers
+to encrypt the message and consumers to decrypt the message. Brokers do not
+require access to the encryption key and never see the unencrypted contents of the
+message, making this approach safe to use in cloud environments. Encryption
+parameters that are required to decrypt the message may be stored in message head‐
+ers or in the message payload if older consumers without header support need access
+Encryption | 289
+
+=== PAGE 319 ===
+to the message. A digital signature may also be included in message headers to verify
+message integrity.
+Figure 11-2 shows a Kafka data flow with end-to-end encryption.
+Figure 11-2. End-to-end encryption
+1. We send a message using a Kafka producer.
+2. The producer uses an encryption key from KMS to encrypt the message.
+3. The encrypted message is sent to the broker. The broker stores the encrypted
+message in the partition logs.
+4. The broker sends the encrypted message to consumers.
+5. The consumer uses the encryption key from KMS to decrypt the message.
+Producers and consumers must be configured with credentials to obtain shared keys
+from KMS. Periodic key rotation is recommended to harden security, since frequent
+rotation limits the number of compromised messages in case of a breach and also
+protects against brute-force attacks. Consumption must be supported with both old
+and new keys during the retention period of messages encrypted with the old key.
+Many KMS systems support graceful key rotation out of the box for symmetric
+encryption without requiring any special handling in Kafka clients. For compacted
+topics, messages encrypted with old keys may be retained for a long time, and it may
+be necessary to re-encrypt old messages. To avoid interference with newer messages,
+producers and consumers must be offline during this process.
+290 | Chapter 11: Securing Kafka
+
+=== PAGE 320 ===
+Compression of Encrypted Messages
+Compressing messages after encryption is unlikely to provide any
+benefit in terms of space reduction compared to compressing prior
+to encryption. Serializers may be configured to perform compres‐
+sion before encrypting the message, or applications may be config‐
+ured to perform compression prior to producing messages. In
+either case, it is better to disable compression in Kafka since it adds
+overhead without providing any additional benefit. For messages
+transmitted over an insecure transport layer, known security
+exploits of compressed encrypted messages must also be taken into
+account.
+In many environments, especially when TLS is used as the transport layer, message
+keys do not require encryption since they typically do not contain sensitive data like
+message payloads. But in some cases, clear-text keys may not comply with regulatory
+requirements. Since message keys are used for partitioning and compaction, transfor‐
+mation of keys must preserve the required hash equivalence to ensure that a key
+retains the same hash value even if encryption parameters are altered. One approach
+would be to store a secure hash of the original key as the message key and store the
+encrypted message key in the message payload or in a header. Since Kafka serializes
+message key and value independently, a producer interceptor can be used to perform
+this transformation.
+Authorization
+Authorization is the process that determines what operations you are allowed to per‐
+form on which resources. Kafka brokers manage access control using a customizable
+authorizer. We saw earlier that whenever connections are established from a client to
+a broker, the broker authenticates the client and associates a KafkaPrincipal that
+represents the client identity with the connection. When a request is processed, the
+broker verifies that the principal associated with the connection is authorized to per‐
+form that request. For example, when Alice’s producer attempts to write a new cus‐
+tomer order record to the topic customerOrders, the broker verifies that User:Alice
+is authorized to write to that topic.
+Kafka has a built-in authorizer, AclAuthorizer, that can be enabled by configuring
+the authorizer class name as follows:
+authorizer.class.name=kafka.security.authorizer.AclAuthorizer
+Authorization | 291
+
+=== PAGE 321 ===
+SimpleAclAuthorizer
+AclAuthorizer was introduced in Apache Kafka 2.3. Older ver‐
+sions from 0.9.0.0 onward had a built-in authorizer,
+kafka.security.auth.SimpleAclAuthorizer, which has been
+deprecated but is still supported.
+AclAuthorizer
+AclAuthorizer supports fine-grained access control for Kafka resources using access
+control lists (ACLs). ACLs are stored in ZooKeeper and cached in memory by every
+broker to enable high-performance lookup for authorizing requests. ACLs are loaded
+into the cache when the broker starts up, and the cache is kept up-to-date using noti‐
+fications based on a ZooKeeper watcher. Every Kafka request is authorized by verify‐
+ing that the KafkaPrincipal associated with the connection has permissions to
+perform the requested operation on the requested resources.
+Each ACL binding consists of:
+• Resource type: Cluster|Topic|Group|TransactionalId|DelegationToken
+• Pattern type: Literal|Prefixed
+• Resource name: Name of the resource or prefix, or the wildcard *
+• Operation: Describe|Create|Delete|Alter|Read|Write|DescribeConfigs|

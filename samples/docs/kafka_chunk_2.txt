@@ -1,0 +1,200 @@
+Multicluster Architectures                                                                                            235
+Some Realities of Cross-Datacenter Communication                                          235
+Hub-and-Spoke Architecture                                                                                   236
+Active-Active Architecture                                                                                       238
+Active-Standby Architecture                                                                                    240
+Stretch Clusters                                                                                                           246
+Apache Kafka’s MirrorMaker                                                                                       247
+Configuring MirrorMaker                                                                                        249
+Multicluster Replication Topology                                                                          251
+Securing MirrorMaker                                                                                              252
+Deploying MirrorMaker in Production                                                                  253
+Tuning MirrorMaker                                                                                                 257
+Other Cross-Cluster Mirroring Solutions                                                                  259
+Uber uReplicator                                                                                                        259
+LinkedIn Brooklin                                                                                                      260
+Confluent Cross-Datacenter Mirroring Solutions                                                261
+Summary                                                                                                                         263
+11. Securing Kafka. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .  265
+Locking Down Kafka                                                                                                     265
+Security Protocols                                                                                                          268
+Authentication                                                                                                                269
+SSL                                                                                                                                270
+SASL                                                                                                                             275
+Reauthentication                                                                                                        286
+Security Updates Without Downtime                                                                     288
+Encryption                                                                                                                      289
+End-to-End Encryption                                                                                            289
+Authorization                                                                                                                 291
+AclAuthorizer                                                                                                             292
+Customizing Authorization                                                                                      295
+Security Considerations                                                                                            297
+Auditing                                                                                                                          298
+Securing ZooKeeper                                                                                                      299
+Table of Contents | ix
+
+=== PAGE 15 ===
+SASL                                                                                                                             299
+SSL                                                                                                                                300
+Authorization                                                                                                              301
+Securing the Platform                                                                                                    301
+Password Protection                                                                                                  301
+Summary                                                                                                                         303
+12. Administering Kafka. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .  305
+Topic Operations                                                                                                            305
+Creating a New Topic                                                                                                306
+Listing All Topics in a Cluster                                                                                  308
+Describing Topic Details                                                                                           308
+Adding Partitions                                                                                                       310
+Reducing Partitions                                                                                                   311
+Deleting a Topic                                                                                                          311
+Consumer Groups                                                                                                         312
+List and Describe Groups                                                                                          312
+Delete Group                                                                                                               313
+Offset Management                                                                                                    314
+Dynamic Configuration Changes                                                                                315
+Overriding Topic Configuration Defaults                                                              315
+Overriding Client and User Configuration Defaults                                            317
+Overriding Broker Configuration Defaults                                                            318
+Describing Configuration Overrides                                                                       319
+Removing Configuration Overrides                                                                        319
+Producing and Consuming                                                                                          320
+Console Producer                                                                                                       320
+Console Consumer                                                                                                    322
+Partition Management                                                                                                  326
+Preferred Replica Election                                                                                        326
+Changing a Partition’s Replicas                                                                                327
+Dumping Log Segments                                                                                            332
+Replica Verification                                                                                                    334
+Other Tools                                                                                                                     334
+Unsafe Operations                                                                                                         335
+Moving the Cluster Controller                                                                                 335
+Removing Topics to Be Deleted                                                                               336
+Deleting Topics Manually                                                                                         336
+Summary                                                                                                                         337
+x | Table of Contents
+
+=== PAGE 16 ===
+13. Monitoring Kafka. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .  339
+Metric Basics                                                                                                                   339
+Where Are the Metrics?                                                                                            339
+What Metrics Do I Need?                                                                                         341
+Application Health Checks                                                                                       343
+Service-Level Objectives                                                                                               343
+Service-Level Definitions                                                                                          343
+What Metrics Make Good SLIs?                                                                              344
+Using SLOs in Alerting                                                                                              345
+Kafka Broker Metrics                                                                                                    346
+Diagnosing Cluster Problems                                                                                   347
+The Art of Under-Replicated Partitions                                                                  348
+Broker Metrics                                                                                                            354
+Topic and Partition Metrics                                                                                      364
+JVM Monitoring                                                                                                         366
+OS Monitoring                                                                                                            367
+Logging                                                                                                                        369
+Client Monitoring                                                                                                          370
+Producer Metrics                                                                                                        370
+Consumer Metrics                                                                                                      373
+Quotas                                                                                                                          376
+Lag Monitoring                                                                                                              377
+End-to-End Monitoring                                                                                               378
+Summary                                                                                                                         378
+14. Stream Processing. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .  381
+What Is Stream Processing?                                                                                         382
+Stream Processing Concepts                                                                                        385
+Topology                                                                                                                      385
+Time                                                                                                                             386
+State                                                                                                                              388
+Stream-Table Duality                                                                                                 389
+Time Windows                                                                                                           390
+Processing Guarantees                                                                                               392
+Stream Processing Design Patterns                                                                             392
+Single-Event Processing                                                                                            392
+Processing with Local State                                                                                       393
+Multiphase Processing/Repartitioning                                                                   395
+Processing with External Lookup: Stream-Table Join                                          396
+Table-Table Join                                                                                                          398
+Streaming Join                                                                                                            398
+Table of Contents | xi
+
+=== PAGE 17 ===
+Out-of-Sequence Events                                                                                            399
+Reprocessing                                                                                                               400
+Interactive Queries                                                                                                     401
+Kafka Streams by Example                                                                                           402
+Word Count                                                                                                                402
+Stock Market Statistics                                                                                               405
+ClickStream Enrichment                                                                                           408
+Kafka Streams: Architecture Overview                                                                      410
+Building a Topology                                                                                                   410
+Optimizing a Topology                                                                                              411
+Testing a Topology                                                                                                     411
+Scaling a Topology                                                                                                     412
+Surviving Failures                                                                                                      415
+Stream Processing Use Cases                                                                                       416
+How to Choose a Stream Processing Framework                                                     417
+Summary                                                                                                                         419
+A. Installing Kafka on Other Operating Systems. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .  421
+B. Additional Kafka Tools. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .  427
+Index. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .  433
+xii | Table of Contents
+
+=== PAGE 18 ===
+Foreword to the Second Edition
+The first edition of Kafka: The Definitive Guide was published five years ago. At the
+time, we estimated that Apache Kafka was used in 30% of Fortune 500 companies.
+Today, over 70% of Fortune 500 companies are using Apache Kafka. It is still one of
+the most popular open source projects in the world and is at the center of a huge
+ecosystem.
+Why all the excitement? I think it is because there has been a huge gap in our infra‐
+structure for data. Traditionally, data management was all about storage—the file
+stores and databases that keep our data safe and let us look up the right bit at the right
+time. Huge amounts of intellectual energy and commercial investment have been
+poured into these systems. But a modern company isn’t just one piece of software
+with one database. A modern company is an incredibly complex system built out of
+hundreds or even thousands of custom applications, microservices, databases, SaaS
+layers, and analytics platforms. And increasingly, the problem we face is how to con‐
+nect all this up into one company and make it all work together in real time.
+This problem isn’t about managing data at rest—it is about managing data in motion.
+And right at the heart of that movement is Apache Kafka, which has become the de
+facto foundation to any platform for data in motion.
+Through this journey, Kafka hasn’t remained static. What started as a bare-bones
+commit log has evolved as well: adding connectors and stream processing capabili‐
+ties, and reinventing its own architecture along the way. The community not only
+evolved existing APIs, configuration options, metrics, and tools to improve Kafka’s
+usability and reliability, but we’ve also introduced a new programmatic administra‐
+tion API, the next generation of global replication and DR with MirrorMaker 2.0, a
+new Raft-based consensus protocol that allows for running Kafka in a single exe‐
+cutable, and true elasticity with tiered storage support. Perhaps most importantly,
+we’ve made Kafka a no-brainer in critical enterprise use cases by adding support for
+advanced security options—authentication, authorization, and encryption.
+xiii
+
+=== PAGE 19 ===
+As Kafka evolves, we see the use cases evolve as well. When the first edition was pub‐
+lished, most Kafka installations were still in traditional on-prem data centers using
+traditional deployment scripts. The most popular use cases were ETL and messaging;
+stream processing use cases were still taking their first steps. Five years later, most
+Kafka installations are in the cloud, and many are running on Kubernetes. ETL and
+messaging are still popular, but they are joined by event-driven microservices, real-
+time stream processing, IoT, machine learning pipelines, and hundreds of industry-
+specific use cases and patterns that range from claims processing in insurance
+companies to trading systems in banks to helping power real-time game play and per‐
+sonalization in video games and streaming services.
+Even as Kafka expands to new environments and use cases, writing applications that
+use Kafka well and deploy it confidently in production requires acclimating to Kafka’s
+unique way of thinking. This book covers everything developers and SREs need to
+use Kafka to its full potential, from the most basic APIs and configuration to the latest
+and most cutting-edge capabilities. It covers not just what you can do with Kafka and
+how to do it, but also what not to do and antipatterns to avoid. This book can be a
+trusted guide to the world of Kafka for both new users and experienced practitioners.
+— Jay Kreps
+Cofounder and CEO at Confluent
+xiv | Foreword to the Second Edition
+
+=== PAGE 20 ===
+Foreword to the First Edition
+It’s an exciting time for Apache Kafka. Kafka is being used by tens of thousands of
+organizations, including over a third of the Fortune 500 companies. It’s among the
+fastest-growing open source projects and has spawned an immense ecosystem
+around it. It’s at the heart of a movement toward managing and processing streams of

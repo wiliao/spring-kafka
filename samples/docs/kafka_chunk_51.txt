@@ -1,0 +1,200 @@
+sumer Uber engineers wrote called Helix consumer. This consumer takes its partition
+assignment from the Apache Helix controller rather than as a result of an agreement
+between the consumers (see Chapter 4 for details on how this is done in Kafka). As a
+result, the Helix consumer can avoid rebalances and instead listen to changes in the
+assigned partitions that arrive from Helix.
+Uber engineering wrote a blog post  describing the architecture in more detail and
+showing the improvements they experienced. uReplicator’s dependency on Apache
+Helix introduces a new component to learn and manage, adding complexity to any
+deployment. As we saw earlier, MirrorMaker 2.0 solves many of these scalability and
+fault-tolerance issues of legacy MirrorMaker without any external dependencies.
+LinkedIn Brooklin
+Like Uber, LinkedIn was also using legacy MirrorMaker for transferring data between
+Kafka clusters. As the scale of the data grew, it also ran into similar scalability issues
+and operational challenges. So LinkedIn built a mirroring solution on top of its data
+streaming system called Brooklin. Brooklin is a distributed service that can stream
+data between different heterogeneous data source and target systems, including
+Kafka. As a generic data ingestion framework that can be used to build data pipelines,
+Brooklin supports multiple use cases:
+• Data bridge to feed data into stream processing systems from different data
+sources
+• Stream change data capture (CDC) events from different data stores
+• Cross-cluster mirroring solution for Kafka
+Brooklin is a scalable distributed system designed for high reliability and has been
+tested with Kafka at scale. It is used to mirror trillions of messages a day and has been
+optimized for stability, performance, and operability. Brooklin comes with a REST
+API for management operations. It is a shared service that can process a large num‐
+ber of data pipelines, enabling the same service to mirror data across multiple Kafka
+clusters.
+260 | Chapter 10: Cross-Cluster Data Mirroring
+
+=== PAGE 290 ===
+Confluent Cross-Datacenter Mirroring Solutions
+At the same time that Uber developed its uReplicator, Confluent independently
+developed Confluent Replicator. Despite the similarities in names, the projects have
+almost nothing in common—they are different solutions to two different sets of Mir‐
+rorMaker problems. Like MirrorMaker 2.0, which came later, Confluent’s Replicator
+is based on the Kafka Connect framework and was developed to address issues its
+enterprise customers encountered when using legacy MirrorMaker to manage their
+multicluster deployments.
+For customers who use stretch clusters for their operational simplicity and low RTO
+and RPO, Confluent added Multi-Region Cluster (MRC) as a built-in feature of Con‐
+fluent Server, which is a commercial component of the Confluent Platform.  MRC
+extends Kafka’s support for stretch clusters using asynchronous replicas to limit
+impact on latency and throughput. Like stretch clusters, this is suitable for replication
+between availability zones or regions with latencies less than 50 ms and benefits from
+transparent client failover. For distant clusters with less reliable networks, a new
+built-in feature called Cluster Linking was added to Confluent Server more recently.
+Cluster Linking extends Kafka’s offset-preserving intra-cluster replication protocol to
+mirror data between clusters.
+Let’s look at the features supported by each of these solutions:
+Confluent Replicator
+Confluent Replicator is a mirroring tool similar to MirrorMaker that relies on the
+Kafka Connect framework for cluster management and can run on existing Con‐
+nect clusters. Both support data replication for different topologies as well as
+migration of consumer offsets and topic configuration. There are some differ‐
+ences in features between the two. For example, MirrorMaker supports ACL
+migration and offset translation for any client, but Replicator doesn’t migrate
+ACLs and supports offset translation (using timestamp interceptor) only for Java
+clients. Replicator doesn’t have the concept of local and remote topics like Mir‐
+rorMaker, but it supports aggregate topics. Like MirrorMaker, Replicator also
+avoids replication cycles but does so using provenance headers. Replicator pro‐
+vides a range of metrics, like replication lag, and can be monitored using its
+REST API or Control Center UI. It also supports schema migration between clus‐
+ters and can perform schema translation.
+Multi-Region Clusters (MRC)
+We saw earlier that stretch clusters provide simple transparent failover and fail‐
+back for clients without the need for offset translation or client restarts. But
+stretch clusters require datacenters to be close to each other and provide a stable
+low-latency network to enable synchronous replication between datacenters.
+MRC is also suitable only for datacenters within a 50 ms latency, but it uses a
+Other Cross-Cluster Mirroring Solutions | 261
+
+=== PAGE 291 ===
+combination of synchronous and asynchronous replication to limit impact on
+producer performance and provide higher network tolerance.
+As we saw earlier, Apache Kafka supports fetching from followers to enable cli‐
+ents to fetch from their closest brokers based on rack ID, thereby reducing cross-
+datacenter traffic. Confluent Server also adds the concept of observers, which are
+asynchronous replicas that do not join the ISR and hence have no impact on pro‐
+ducers using acks=all but are able to deliver records to consumers. Operators
+can configure synchronous replication within a region and asynchronous repli‐
+cation between regions to benefit from both low latency and high durability at
+the same time. Replica placement constraints in Confluent Server allow you to
+specify a minimum number of replicas per region using rack IDs to ensure that
+replicas are spread across regions to guarantee durability. Confluent Platform 6.1
+also adds automatic observer promotion with configurable criteria, enabling fast
+failover without data loss automatically. When min.insync.replicas falls below
+a configured minimum number of synchronous replicas, observers that have
+caught up are automatically promoted to allow them to join ISRs, bringing the
+number of ISRs back up to the required minimum. The promoted observers use
+synchronous replication and may impact throughput, but the cluster remains
+operational throughout without data loss even if a region fails. When the failed
+region recovers, observers are automatically demoted, getting the cluster back to
+normal performance levels.
+Cluster Linking
+Cluster Linking, introduced as a preview feature in Confluent Platform 6.0,
+builds inter-cluster replication directly into the Confluent Server. By using the
+same protocol as inter-broker replication within a cluster, Cluster Linking per‐
+forms offset-preserving replication across clusters, enabling seamless migration
+of clients without any need for offset translation. Topic configuration, partitions,
+consumer offsets, and ACLs are all kept synchronized between the two clusters to
+enable failover with low RTO if a disaster occurs. A cluster link defines the con‐
+figuration of a directional flow from a source cluster to a destination cluster.
+Leader brokers of mirror partitions in the destination cluster fetch partition data
+from the corresponding source leaders, while followers in the destination repli‐
+cate from their local leader using the standard replication mechanism in Kafka.
+Mirror topics are marked as read-only in the destination to prevent any local
+produce to these topics, ensuring that mirror topics are logically identical to their
+source topic.
+Cluster Linking provides operational simplicity without the need for separate
+clusters like Connect clusters and is more performant than external tools since it
+avoids decompression and recompression during mirroring. Unlike MRC, there
+is no option for synchronous replication, and client failover is a manual process
+that requires client restart. But Cluster Linking may be used with distant
+262 | Chapter 10: Cross-Cluster Data Mirroring
+
+=== PAGE 292 ===
+datacenters with unreliable high-latency networks and reduces cross-datacenter
+traffic by replicating only once between datacenters. It is suitable for cluster
+migration and topic sharing use cases.
+Summary
+We started the chapter by describing the reasons you may need to manage more than
+a single Kafka cluster and then proceeded to describe several common multicluster
+architectures, ranging from the simple to the very complex. We went into the details
+of implementing failover architecture for Kafka and compared the different options
+currently available. Then we proceeded to discuss the available tools. Starting with
+Apache Kafka’s MirrorMaker, we went into many details of using it in production. We
+finished by reviewing alternative options that solve some of the issues you might
+encounter with MirrorMaker.
+Whichever architecture and tools you end up using, remember that multicluster con‐
+figuration and mirroring pipelines should be monitored and tested just like every‐
+thing else you take into production. Because multicluster management in Kafka can
+be easier than it is with relational databases, some organizations treat it as an after‐
+thought and neglect to apply proper design, planning, testing, deployment automa‐
+tion, monitoring, and maintenance. By taking multicluster management seriously,
+preferably as part of a holistic disaster or geodiversity plan for the entire organization
+that involves multiple applications and data stores, you will greatly increase the chan‐
+ces of successfully managing multiple Kafka clusters.
+Summary | 263
+
+=== PAGE 294 ===
+CHAPTER 11
+Securing Kafka
+Kafka is used for a variety of use cases ranging from website activity tracking and
+metrics pipelines to patient record management and online payments. Each use case
+has different requirements in terms of security, performance, reliability, and availabil‐
+ity. While it is always preferable to use the strongest and latest security features avail‐
+able, trade-offs are often necessary since increased security impacts performance,
+cost, and user experience. Kafka supports several standard security technologies with
+a range of configuration options to tailor security to each use case.
+Like performance and reliability, security is an aspect of the system that must be
+addressed for the system as a whole, rather than component by component. The secu‐
+rity of a system is only as strong as the weakest link, and security processes and poli‐
+cies must be enforced across the system, including the underlying platform. The
+customizable security features in Kafka enable integration with existing security
+infrastructure to build a consistent security model that applies to the entire system.
+In this chapter, we will discuss the security features in Kafka and see how they address
+different aspects of security and contribute toward the overall security of the Kafka
+installation. Throughout the chapter, we will share best practices, potential threats,
+and techniques to mitigate these threats. We will also review additional measures that
+can be adopted to secure ZooKeeper and the rest of the platform.
+Locking Down Kafka
+Kafka uses a range of security procedures to establish and maintain confidentiality,
+integrity, and availability of data:
+• Authentication establishes your identity and determines who you are.
+• Authorization determines what you are allowed to do.
+265
+
+=== PAGE 295 ===
+• Encryption protects your data from eavesdropping and tampering.
+• Auditing tracks what you have done or have attempted to do.
+• Quotas control how much resources you can utilize.
+To understand how to lock down a Kafka deployment, let’s first look at how data
+flows through a Kafka cluster. Figure 11-1 shows the main steps in an example data
+flow. In this chapter, we will use this example flow to examine the different ways in
+which Kafka can be configured to protect data at every step to guarantee security of
+the entire deployment.
+Figure 11-1. Data flow in a Kafka cluster
+1. Alice produces a customer order record to a partition of the topic named
+customerOrders. The record is sent to the leader of the partition.
+2. The leader broker writes the record to its local log file.
+3. A follower broker fetches the message from the leader and writes to its local rep‐
+lica log file.
+4. The leader broker updates the partition state in ZooKeeper to update in-sync
+replicas, if required.
+5. Bob consumes customer order records from the topic customerOrders. Bob
+receives the record produced by Alice.
+6. An internal application processes all messages arriving in customerOrders to
+produce real-time metrics on popular products.
+266 | Chapter 11: Securing Kafka
+
+=== PAGE 296 ===
+A secure deployment must guarantee:
+Client authenticity
+When Alice establishes a client connection to the broker, the broker should
+authenticate the client to ensure that the message is really coming from Alice.
+Server authenticity
+Before sending a message to the leader broker, Alice’s client should verify that the
+connection is to the real broker.
+Data privacy

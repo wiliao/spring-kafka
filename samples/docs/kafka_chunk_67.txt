@@ -1,0 +1,200 @@
+tion that acts on it, because the data does not leave as much room for interpretation
+as to its meaning. On the other hand, if the metrics will be consumed by humans,
+presenting a large number of metrics will be overwhelming.  This becomes even more
+important when defining alerts based on those measurements. It is far too easy to
+succumb to “alert fatigue, ” where there are so many alerts going off that it is difficult
+to know how severe the problem is. It is also hard to properly define thresholds for
+every metric and keep them up-to-date. When the alerts are overwhelming or often
+incorrect, we begin to not trust that the alerts are correctly describing the state of our
+applications.
+Think about the operations of a car. To properly adjust the ratio of air to fuel while
+the car is running, the computer needs a number of measurements of air density, fuel,
+exhaust, and other minutiae about the operation of the engine. These measurements
+would be overwhelming to the human operator of the vehicle, however. Instead, we
+have a “Check Engine” light. A single indicator tells you that there is a problem, and
+there is a way to find out more detailed information to tell you exactly what the prob‐
+lem is. Throughout this chapter, we will identify the metrics that will provide the
+highest amount of coverage to keep your alerting simple.
+342 | Chapter 13: Monitoring Kafka
+
+=== PAGE 372 ===
+Application Health Checks
+No matter how you collect metrics from Kafka, you should make sure that you have a
+way to also monitor the overall health of the application process via a simple health
+check. This can be done in two ways:
+• An external process that reports whether the broker is up or down (health check)
+• Alerting on the lack of metrics being reported by the Kafka broker (sometimes
+called stale metrics)
+Though the second method works, it can make it difficult to differentiate between a
+failure of the Kafka broker and a failure of the monitoring system itself.
+For the Kafka broker, this can simply be connecting to the external port (the same
+port that clients use to connect to the broker) to check that it responds. For client
+applications, it can be more complex, ranging from a simple check of whether the
+process is running, to an internal method that determines application health.
+Service-Level Objectives
+One area of monitoring that is especially critical for infrastructure services, such as
+Kafka, is that of service-level objectives, or SLOs.  This is how we communicate to our
+clients what level of service they can expect from the infrastructure service. The cli‐
+ents want to be able to treat services like Kafka as an opaque system: they do not want
+or need to understand the internals of how it works—only the interface that they are
+using and knowing it will do what they need it to do.
+Service-Level Definitions
+Before discussing SLOs in Kafka, there must be agreement on the terminology that is
+used. Frequently, you will hear engineers, managers, executives, and everyone else use
+terms in the “service-level” space incorrectly, which leads to confusion about what is
+actually being talked about.
+A service-level indicator (SLI) is a metric that describes one aspect of a service’s relia‐
+bility. It should be closely aligned with your client’s experience, so it is usually true
+that the more objective these measurements are, the better they are. In a request pro‐
+cessing system, such as Kafka, it is usually best to express these measurements as a
+ratio between the number of good events and the total number of events—for exam‐
+ple, the proportion of requests to a web server that return a 2xx, 3xx, or 4xx response.
+A service-level objective (SLO), which can also be called a service-level threshold (SLT),
+combines an SLI with a target value. A common way to express the target is by the
+number of nines (99.9% is “three nines”), though it is by no means required. The SLO
+should also include a time frame that it is measured over, frequently on the scale of
+Service-Level Objectives | 343
+
+=== PAGE 373 ===
+days. For example, 99% of requests to the web server must return a 2xx, 3xx, or 4xx
+response over 7 days.
+A service-level agreement (SLA) is a contract between a service provider and a client.
+It usually includes several SLOs, as well as details about how they are measured and
+reported, how the client seeks support from the service provider, and penalties that
+the service provider will be subject to if they are not performing within the SLA. For
+example, an SLA for the preceding SLO might state that if the service provider is not
+operating within the SLO, they will refund all fees paid by the client for the time
+period that the service was not within the SLO.
+Operational-Level Agreement
+The term operational-level agreement (OLA) is less frequently used.
+It describes agreements between multiple internal services or sup‐
+port providers in the overall delivery of an SLA. The goal is to
+assure that the multiple activities that are necessary to fulfill the
+SLA are properly described and accounted for in the day-to-day
+operations.
+It is very common to hear people talk about SLAs when they really mean SLOs. While
+those who are providing a service to paying clients may have SLAs with those clients,
+it is rare that the engineers running the applications are responsible for anything
+more than the performance of that service within the SLOs. In addition, those who
+only have internal clients (i.e., are running Kafka as internal data infrastructure for a
+much larger service) generally do not have SLAs with those internal customers. This
+should not prevent you from setting and communicating SLOs, however, as doing
+that will lead to fewer assumptions by customers as to how they think Kafka should
+be performing.
+What Metrics Make Good SLIs?
+In general, the metrics for your SLIs should be gathered using something external to
+the Kafka brokers. The reason for this is that SLOs should describe whether or not
+the typical user of your service is happy, and you can’t measure that subjectively. Y our
+clients do not care if you think your service is running correctly; it is their experience
+(in aggregate) that matters. This means that infrastructure metrics are OK, synthetic
+clients are good, and client-side metrics are probably the best for most of your SLIs.
+While by no means an exhaustive list, the most common SLIs that are used in
+request/response and data storage systems are in Table 13-2.
+344 | Chapter 13: Monitoring Kafka
+
+=== PAGE 374 ===
+Customers Always Want More
+There are some SLOs that your customers may be interested in that
+are important to them but not within your control. For example,
+they may be concerned about the correctness or freshness of the
+data produced to Kafka. Do not agree to support SLOs that you are
+not responsible for, as that will only lead to taking on work that
+dilutes the core job of keeping Kafka running properly. Make sure
+to connect them with the proper group to set up understanding,
+and agreements, around these additional requirements.
+Table 13-2. Types of SLIs
+Availability Is the client able to make a request and get a response?
+Latency How quickly is the response returned?
+Quality Does the response include a proper response?
+Security Are the request and response appropriately protected, whether that is authorization or encryption?
+Throughput Can the client get enough data, fast enough?
+Keep in mind that it is usually better for your SLIs to be based on a counter of events
+that fall inside the thresholds of the SLO. This means that ideally, each event would be
+individually checked to see if it meets the threshold of the SLO. This rules out quan‐
+tile metrics as good SLIs, as those will only tell you that 90% of your events were
+below a given value without allowing you to control what that value is. However,
+aggregating values into buckets (e.g., “less than 10 ms, ” “10–50 ms, ” “50–100 ms, ” etc.)
+can be useful when working with SLOs, especially when you are not yet sure what a
+good threshold is. This will give you a view into the distribution of the events within
+the range of the SLO, and you can configure the buckets so that the boundaries are
+reasonable values for the SLO threshold.
+Using SLOs in Alerting
+In short, SLOs should inform your primary alerts. The reason for this is that the SLOs
+describe problems from your customers’ point of view, and those are the ones that
+you should be concerned about first. Generally speaking, if a problem does not
+impact your clients, it does not need to wake you up at night. SLOs will also tell you
+about the problems that you don’t know how to detect because you’ve never seen
+them before. They won’t tell you what those problems are, but they will tell you that
+they exist.
+Service-Level Objectives | 345
+
+=== PAGE 375 ===
+The challenge is that it’s very difficult to use an SLO directly as an alert. SLOs are best
+for long timescales, such as a week, as we want to report them to management and
+customers in a way that can be consumed. In addition, by the time the SLO alert fires,
+it’s too late—you’re already operating outside of the SLO. Some will use a derivative
+value to provide an early warning, but the best way to approach using SLOs for alert‐
+ing is to observe the rate at which you are burning through your SLO over its
+timeframe.
+As an example, let’s assume that your Kafka cluster receives one million requests per
+week, and you have an SLO defined that states that 99.9% of requests must send out
+the first byte of response within 10 ms. This means that over the week, you can have
+up to one thousand requests that respond slower than this and everything will still be
+OK. Normally, you see one request like this every hour, which is about 168 bad
+requests a week, measured from Sunday to Saturday. Y ou have a metric that shows
+this as the SLO burn rate, and one request an hour at one million requests a week is a
+burn rate of 0.1% per hour.
+On Tuesday at 10 a.m., your metric changes and now shows that the burn rate is 0.4%
+per hour. This isn’t great, but it’s still not a problem because you’ll be well within the
+SLO by the end of the week. Y ou open a ticket to take a look at the problem but go
+back to some higher-priority work. On Wednesday at 2 p.m., the burn rate jumps to
+2% per hour and your alerts go off. Y ou know that at this rate, you’ll breach the SLO
+by lunchtime on Friday. Dropping everything, you diagnose the problem, and after
+about 4 hours you have the burn rate back down to 0.4% per hour, and it stays there
+for the rest of the week. By using the burn rate, you were able to avoid breaching the
+SLO for the week.
+For more information on utilizing SLOs and the burn rate for alerting, you will find
+that Site Reliability Engineering  and The Site Reliability Workbook , both edited by
+Betsy Beyer et al. (O’Reilly), are excellent resources.
+Kafka Broker Metrics
+There are many Kafka broker metrics. Many of them are low-level measurements,
+added by developers when investigating a specific issue or in anticipation of needing
+information for debugging purposes later. There are metrics providing information
+about nearly every function within the broker, but the most common ones provide
+the information needed to run Kafka on a daily basis.
+346 | Chapter 13: Monitoring Kafka
+
+=== PAGE 376 ===
+Who Watches the Watchers?
+Many organizations use Kafka for collecting application metrics,
+system metrics, and logs for consumption by a central monitoring
+system. This is an excellent way to decouple the applications from
+the monitoring system, but it presents a specific concern for Kafka
+itself. If you use this same system for monitoring Kafka itself, it is
+very likely that you will never know when Kafka is broken because
+the data flow for your monitoring system will be broken as well.
+There are many ways that this can be addressed. One way is to use
+a separate monitoring system for Kafka that does not have a
+dependency on Kafka. Another way, if you have multiple datacen‐
+ters, is to make sure that the metrics for the Kafka cluster in data‐
+center A are produced to datacenter B, and vice versa. However
+you decide to handle it, make sure that the monitoring and alerting
+for Kafka does not depend on Kafka working.
+In this section, we’ll start by discussing the high-level workflow for diagnosing prob‐
+lems with your Kafka cluster, referencing the metrics that are useful. Those, and other
+metrics, are described in more detail later in the chapter. This is by no means an
+exhaustive list of broker metrics, but rather several “must have” metrics for checking
+on the health of the broker and the cluster. We’ll wrap up with a discussion on log‐
+ging before moving on to client metrics.
+Diagnosing Cluster Problems
+When it comes to problems with a Kafka cluster, there are three major categories:
+• Single-broker problems
+• Overloaded clusters
+• Controller problems
+Issues with individual brokers are, by far, the easiest to diagnose and respond to.
+These will show up as outliers in the metrics for the cluster and are frequently related
+to slow or failing storage devices or compute restraints from other applications on the
+system. To detect them, make sure you are monitoring the availability of the individ‐
+ual servers, as well as the status of the storage devices, utilizing the operating system
+(OS) metrics.
+Absent a problem identified at the OS or hardware level, however, the cause is almost

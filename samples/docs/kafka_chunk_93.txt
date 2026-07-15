@@ -1,0 +1,200 @@
+event time, 386
+log append time, 386
+processing time, 387
+time metrics for requests, 362
+time windows, 390
+timeliness in data pipelines, 204
+TimeoutException, 75
+timeoutMs setting, AdminClient methods, 114
+TimestampExtractor interface, 387
+timestamps
+index mapping to Kafka message offsets,
+156
+TLS (Transport Layer Security), 268, 289
+use with SASL/OAUTHBEARER, 285
+ZooKeeper support for, 299
+Index | 453
+
+=== PAGE 483 ===
+TLS/SSL, 269, 270
+configuring TLS, 270
+security considerations for TLS, 274
+tombstones, 158
+TopicExistsException, 120
+topics, 5, 305-312
+adding partitions to, 127
+compaction of, timing, 159
+configuration and ACL migration, mirror‐
+ing, 250
+configuration defaults, overriding, 315
+configuration, checking and correcting, 122
+consumers subscribing to, 85
+controlling reliability trade-offs at topic
+level, 164
+creating with kafka-topics.sh, 306
+creation of, 148
+default configurations, 27-33
+default.replication.factor, 29
+log.retention.bytes, 30
+log.retention.ms, 30
+log.roll.ms, 32
+log.segment.bytes, 31
+message.max.bytes, 32
+min.insync.replicas, 32
+num.partitions, 28
+per-topic overrides, no longer sup‐
+ported, 28
+deleting, 311
+deleting manually, 336
+deleting records from, 128
+describing topic details, 308
+finding potentially problematic topic
+partitions, 309
+finding topics at the minimum ISR set‐
+tings, 309
+determining number of replicas for, 165
+good naming practices, 307
+increasing number of partitions for, 310
+topics with keyed messages, 310
+listing all in a cluster, 308
+managing with AdminClient, 113, 118-121
+checking if topic exists and creating it if
+not, 118
+listing topics in a cluster, 118
+metrics, 364
+per-topic metrics, 364
+mirrored with MirrorMaker, 249
+moving onto new brokers, 327
+partitions, 6
+per-topic consumer metrics, 375
+per-topic producer metrics, 372
+reducing partitions for, 311
+removing configuration override for reten‐
+tion.ms, 319
+removing topics to be deleted, 336
+retention period for, 152
+retention policies, 156
+specifying for console consumer, 323
+valid keys for, 316
+topology in stream processing, 385
+building a topology, 410
+event processing with local state, 393
+optimizing a topology, 411
+processing topology, DAG, 402
+scaling a topology, 412
+testing a topology, 411
+TopologyTestDriver, 412
+transaction coordinator, 198
+transaction log, 198
+transaction.timeout.ms parameter, 190, 199
+transactional producers, 189
+transactional.id, 189, 195
+transactional.id.expiration.ms, 200
+transactions, 186-200
+how they guarantee exactly once, 188-191
+how they work, 198-200
+how to use, 193-196
+exactly-once guarantees without using
+Kafka Streams, 194
+mirroring solutions not supporting, 241
+performance, 200
+problems not solved by, 191-193
+copying data from one Kafka cluster to
+another, 192
+publish/subscribe pattern, 193
+reading from database, writing to Kafka,
+then to another database, 192
+reading from Kafka topic and writing to
+database, 191
+side effects while stream processing, 191
+problems solved by, 187
+reprocessing caused by application
+crashes, 187
+reprocessing caused by zombie applica‐
+tions, 188
+transactional IDs and fencing, 196-198
+454 | Index
+
+=== PAGE 484 ===
+use by Kafka Streams for exactly-once guar‐
+antees, 392
+use cases, 187
+transformations, 207
+available from outside main Kafka code
+base, 224
+single message transformations in Kafka
+Connect, 223
+Transport Layer Security (see TLS)
+Trogdor test framework, 178
+trogdor.sh testing framework, 335
+trust stores, 271, 273
+for brokers, 273
+for SSL on ZooKeeper, 300
+generating for client using broker's self-
+signed CA, 272
+tumbling window, 391
+two-phase commit (transactions), 198
+U
+Uber uReplicator, 259
+unclean leader election, 129, 166
+testing, 177
+unclean.leader.election.enable parameter, 166,
+319
+under-replicated partitions, 348, 366
+alerting trap, 349
+UniformStickyPartitioner, 69
+UNKNOWN_PRODUCER_ID errors, 186, 200
+unsafe operations, 335-337
+deleting topics manually, 336
+moving cluster controller, 335
+removing topics to be deleted, 336
+user activity tracking, 12, 14
+User:ANONYMOUS principal, 270
+users
+configuration defaults, overriding, 317
+V
+value.converter configuration (Connect work‐
+ers), 212
+value.deserializer property, 84
+value.serializer property (producers), 50
+VerifiableConsumer class, 176
+VerifiableProducer class, 176
+vm.dirty_background_ratio, 40
+vm.max_map_count, 40
+vm.overcommit_memory, 40
+vm.swappiness parameter, 39
+W
+wakeup method (consumer), 105
+WakeupException, 105
+windowed joins, 398
+WindowedSerde object, 407
+Windows OS, installing Kafka on, 421-424
+using native Java, 422-424
+using Windows Subsystem for Linux, 421
+word count example (Kafka Streams), 402-405
+topology for, 410
+worker processes, 211, 227
+starting and configuring, 211
+writers, 6
+(see also producers)
+writing messages to Kafka, 47
+(see also producers)
+X
+XFS (Extents File System), 41
+Xinfra Monitor, 378
+Z
+zero-copy method, 145
+zombie applications
+reprocessing caused by, 188
+zombie fencing, 189, 196
+ZooKeeper
+broker registration with, 135
+colocating applications on, 44
+consumer groups based in, 312
+installing, 20-23
+standalone server, 20
+version 3.5.9, 20
+ZooKeeper ensemble, 21
+not recommended for direct use in admin
+operations, 115
+replacement of ZooKeeper-based controller,

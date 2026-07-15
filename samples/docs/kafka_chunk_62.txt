@@ -1,0 +1,200 @@
+=== PAGE 346 ===
+Configuration key Description
+message.timestamp.type Which timestamp to use when writing messages to disk. Current values are Create
+Time for the timestamp specified by the client and LogAppendTime for the time
+when the message is written to the partition by the broker.
+min.cleanable.
+dirty.ratio
+How frequently the log compactor will attempt to compact partitions for this topic,
+expressed as a ratio of the number of uncompacted log segments to the total number of
+log segments. Only valid for log compacted topics.
+min.compaction.lag.ms Minimum time a message will remain uncompacted in the log.
+min.insync.replicas The minimum number of replicas that must be in sync for a partition of the topic to be
+considered available.
+preallocate If set to true, log segments for this topic should be preallocated when a new segment
+is rolled.
+retention.bytes The amount of messages, in bytes, to retain for this topic.
+retention.ms How long messages should be retained for this topic, in milliseconds.
+segment.bytes The amount of messages, in bytes, that should be written to a single log segment in a
+partition.
+segment.index.bytes The maximum size, in bytes, of a single log segment index.
+segment.jitter.ms A maximum number of milliseconds that is randomized and added to segment.ms
+when rolling log segments.
+segment.ms How frequently, in milliseconds, the log segment for each partition should be rotated.
+unclean.leader.
+election.enable
+If set to false, unclean leader elections will not be permitted for this topic.
+Overriding Client and User Configuration Defaults
+For Kafka clients and users, there are only a few configurations that can be overrid‐
+den, which are all essentially types of quotas. Two of the more common configura‐
+tions to change are the bytes/sec rates allowed for producers and consumers with a
+specified client ID on a per-broker basis. The full list of shared configurations that
+can be modified for both users and clients is shown in Table 12-3.
+Uneven Throttling Behavior in Poorly Balanced Clusters
+Because throttling occurs on a per-broker basis, even balance of
+leadership of partitions across a cluster becomes particularly
+important to enforce this properly. If you have 5 brokers in a clus‐
+ter and you specify a producer quota of 10 MBps for a client, that
+client will be allowed to produce 10 MBps on each broker at the
+same time for a total of 50 MBps, assuming a balanced leadership
+across all 5 hosts. However, if leadership for every partition is all on
+broker 1, the same producer will only be able to produce a max of
+10 MBps.
+Dynamic Configuration Changes | 317
+
+=== PAGE 347 ===
+Table 12-3. The configurations (keys) for clients
+Configuration key Description
+consumer_bytes_rate The amount of messages, in bytes, that a single client ID is allowed to consume from
+a single broker in one second.
+producer_bytes_rate The amount of messages, in bytes, that a single client ID is allowed to produce to a
+single broker in one second.
+controller_mutations_rate The rate at which mutations are accepted for the create topics request, the create
+partitions request, and the delete topics request. The rate is accumulated by the
+number of partitions created or deleted.
+request_percentage The percentage per quota window (out of a total of (num.io.threads +
+num.network.threads) × 100%) for requests from the user or client.
+Client ID Versus Consumer Group
+The client ID is not necessarily the same as the consumer group
+name. Consumers can set their own client ID, and you may have
+many consumers that are in different groups that specify the same
+client ID. It is considered a best practice to set the client ID for each
+consumer group to something unique that identifies that group.
+This allows a single consumer group to share a quota, and it makes
+it easier to identify in logs what group is responsible for requests.
+Compatible user and client config changes can be specified together for compatible
+configs that apply to both. Here is an example of the command to change the control‐
+ler mutation rate for both a user and client in one configuration step:
+# kafka-configs.sh --bootstrap-server localhost:9092
+--alter --add-config "controller_mutations_rate=10"
+--entity-type clients --entity-name <client ID>
+--entity-type users --entity-name <user ID>
+#
+Overriding Broker Configuration Defaults
+Broker- and cluster-level configs will primarily be configured statically in the cluster
+configuration files, but there is a plethora of configs that can be overridden during
+runtime without needing to redeploy Kafka. More than 80 overrides can be altered
+with kafka-configs.sh for brokers. As such, we will not list them all in this book, but
+they can be referenced by the --help command or found in the open source docu‐
+mentation. A few important configs worth pointing out specifically are:
+min.insync.replicas
+Adjusts the minimum number of replicas that need to acknowledge a write for a
+produce request to be successful when producers have set acks to all (or –1).
+318 | Chapter 12: Administering Kafka
+
+=== PAGE 348 ===
+unclean.leader.election.enable
+Allows replicas to be elected as leader even if it results in data loss. This is useful
+when it is permissible to have some lossy data, or to turn on for short times to
+unstick a Kafka cluster if unrecoverable data loss cannot be avoided.
+max.connections
+The maximum number of connections allowed to a broker at any time.  We can
+also use max.connections.per.ip and max.connections.per.ip.overrides for
+more fine-tuned throttling.
+Describing Configuration Overrides
+All configuration overrides can be listed using the kafka-config.sh tool. This will
+allow you to examine the specific configuration for a topic, broker, or client. Similar
+to other tools, this is done using the --describe command.
+In the following example, we can get all the configuration overrides for the topic
+named “my-topic, ” which we observe is only the retention time:
+# kafka-configs.sh --bootstrap-server localhost:9092
+--describe --entity-type topics --entity-name my-topic
+Configs for topics:my-topic are
+retention.ms=3600000
+#
+Topic Overrides Only
+The configuration description will only show overrides—it does
+not include the cluster default configurations. There is not a way to
+dynamically discover the configuration of the brokers themselves.
+This means that when using this tool to discover topic or client set‐
+tings in automation, the user must have separate knowledge of the
+cluster default configuration.
+Removing Configuration Overrides
+Dynamic configurations can be removed entirely, which will cause the entity to revert
+back to the cluster defaults. To delete a configuration override, use the --alter com‐
+mand along with the --delete-config parameter.
+For example, delete a configuration override for retention.ms for a topic named
+“my-topic”:
+# kafka-configs.sh --bootstrap-server localhost:9092
+--alter --entity-type topics --entity-name my-topic
+--delete-config retention.ms
+Updated config for topic: "my-topic".
+#
+Dynamic Configuration Changes | 319
+
+=== PAGE 349 ===
+Producing and Consuming
+While working with Kafka, you will often find it is necessary to manually produce or
+consume some sample messages in order to validate what’s going on with your appli‐
+cations. Two utilities are provided to help with this, kafka-console-consumer.sh
+and kafka-console-producer.sh, which were touched upon briefly in Chapter 2 to
+verify our installation. These tools are wrappers around the main Java client libraries
+that allow you to interact with Kafka topics without having to write an entire applica‐
+tion to do it.
+Piping Output to Another Application
+While it is possible to write applications that wrap around the con‐
+sole consumer or producer (e.g., to consume messages and pipe
+them to another application for processing), this type of applica‐
+tion is quite fragile and should be avoided. It is difficult to interact
+with the console consumer in a way that does not lose messages.
+Likewise, the console producer does not allow for using all features,
+and properly sending bytes is tricky. It is best to use either the Java
+client libraries directly or a third-party client library for other lan‐
+guages that use the Kafka protocol directly.
+Console Producer
+The kakfa-console-producer.sh tool can be used to write messages into a Kafka
+topic in your cluster. By default, messages are read one per line, with a tab character
+separating the key and the value (if no tab character is present, the key is null). As
+with the console consumer, the producer reads in and produces raw bytes using the
+default serializer (which is DefaultEncoder).
+The console producer requires that a minimum of two arguments are provided to
+know what Kafka cluster to connect to and which topic to produce to within that
+cluster. The first is the customary --bootstrap-server connection string we are used
+to using. When you are done producing, send an end-of-file (EOF) character to close
+the client. In most common terminals, this is done with Control-D.
+Here we can see an example of producing four messages to a topic named “my-topic”:
+# kafka-console-producer.sh --bootstrap-server localhost:9092 --topic my-topic
+>Message 1
+>Test Message 2
+>Test Message 3
+>Message 4
+>^D
+#
+320 | Chapter 12: Administering Kafka
+
+=== PAGE 350 ===
+Using producer configuration options
+It is possible to pass normal producer configuration options to the console producer
+as well. This can be done in two ways, depending on how many options you need to
+pass and how you prefer to do it. The first is to provide a producer configuration file
+by specifying --producer.config <config-file>, where <config-file> is the full
+path to a file that contains the configuration options. The other way is to specify the
+options on the command line with one or more arguments of the form --producer-
+property <key>=<value>, where <key> is the configuration option name and
+<value> is the value to set it to. This can be useful for producer options like message-
+batching configurations (such as linger.ms or batch.size).
+Confusing Command-Line Options
+The --property command-line option is available for both the
+console producer and the console consumer, but this should not be
+confused with the --producer-property or --consumer-property
+options, respectively. The --property option is only used for pass‐
+ing configurations to the message formatter, and not the client
+itself.
+The console producer has many command-line arguments available to use with the
+--producer-property option for adjusting its behavior. Some of the more useful
+options are:
+--batch-size
+Specifies the number of messages sent in a single batch if they are not being sent
+synchronously.
+--timeout
+If a producer is running in asynchronous mode, this provides the max amount of
+time waiting for the batch size before producing to avoid long waits on low-
+producing topics.
+--compression-codec <string>
+Specify the type of compression to be used when producing messages. Valid types
+can be one of the following: none, gzip, snappy, zstd, or lz4. The default value is
+gzip.
+--sync
+Produce messages synchronously, waiting for each message to be acknowledged
+before sending the next one.
+Producing and Consuming | 321

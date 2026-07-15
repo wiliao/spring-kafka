@@ -1,0 +1,200 @@
+regular expressions
+consumer using to subcribe to multiple top‐
+ics, 85
+matching all topics to consume from (--
+whitelist option), 323
+regulatory compliance
+use of cross-cluster data mirroring, 234
+reliability, 161-180
+broker configuration, 164-169
+for data pipelines, 205
+guarantees, 162
+producer acks parameter and, 55
+replication, 163
+using consumers in a reliable system,
+172-176
+Index | 449
+
+=== PAGE 479 ===
+using producers in a reliable system,
+169-172
+validating for a system, 176-179
+monitoring reliability, 178-179
+monitoring reliability in production, 178
+validating applications, 177
+validating configuration, 176
+remote storage, 150
+RemoteLogManager, 150
+repartitioning, 395
+replica.lag.time.max.ms parameter, 141, 168
+replicas
+changing for a partition, 327-332
+canceling replica reassignments, 331
+checking for a topic, 118
+determining right number for topics, 165
+fetching messages from closest replica, 93
+follower, 140
+in sync, 163
+keeping in sync, 168
+leader, 140
+out of sync, 163
+partition, allocating among brokers, 151
+placement of, 166
+reassigning, 129
+specifying number for new topic, 306
+verification of, 334
+ReplicaSelector interface, 140
+replication, 139-142, 163, 233
+between clusters, 236
+flow for active-standby architecture in Mir‐
+rorMaker, 249
+improvements in, 164
+in multicluster, hub-and-spoke architecture,
+237
+MirrorMaker support for, 248
+multicluster replication topology, 251
+preventing replication cycles in active-active
+mirroring, 239
+replica capacity per broker, 37
+replication factor for brokers, 165
+synchronous, in stretch clusters, 246
+throttling using quotas, 129
+under-replicated partitions, 348
+replication factor, 164
+for brokers, 165
+changing for a partition, 331
+replication of partitions, 8
+replication.factor parameter, 165
+reprocessing events, 400
+reprocessing messages
+using an application, 123
+request handler threads, 355
+request handler idle ratio, 355
+request metrics, 361
+Fetch request metrics, 361
+time metrics, 362
+request processing, 142-149
+Fetch requests, 145
+other types of requests, 147
+produce requests, 144
+request queue, 143
+request quotas, 73
+request-latency-avg metric, 371
+request-response, 384
+request.timeout.ms parameter, 58, 90, 117
+RequestMetrics type, 182
+response queue, 143
+REST APIs
+for monitoring Confluent Replicator, 261
+rest.home.name configuration (Connect work‐
+ers), 213
+rest.port configuration (Connect workers), 213
+Result objects, Futue object wrapped in, 114,
+119
+retention of messages, 8
+(see also storage)
+disk-based retention, 11
+setting for a topic, 316
+retriable errors (producers), 53
+retries
+async commits, 99
+configuring for producers, 171
+consumer, 175
+producer, 184
+retries parameter, 58, 60
+retry.backoff.ms parameter, 58
+role-based access control, 296
+rolling restart, testing, 177
+RoundRobinAssignor, 92
+RoundRobinPartitioner, 69
+RPO (recovery point objective), 241
+RTO (recovery time objective), 241
+S
+Salted Challenge Response Authentication
+Mechanism (SCRAM), 281
+(see also SASL/SCRAM)
+450 | Index
+
+=== PAGE 480 ===
+SASL (Simple Authentication and Security
+Layer), 117, 208, 275-276
+configuring for ZooKeeper, 299
+delegation tokens, 285-286
+use of SASL/SCRAM to support authen‐
+tication with, 286
+use for MirrorMaker authentication, 252
+sasl.jaas.config parameter, 276
+sasl.kerberos.service.name parameter, 277
+sasl.login.callback.handler.class parameter, 283
+sasl.mechanism parameter, 275
+SASL/DIGEST-MD5, 299
+SASL/GSSAPI, 276-278
+configuring, 276
+security considerations, 277
+SASL/OAUTHBEARER, 283
+configuring, 283
+security considerations, 285
+SASL/PLAIN, 278-281
+configuring, 278
+loading credentials from external files, 303
+security considerations, 281
+SASL/SCRAM, 281-282
+configuring, 281
+security considerations, 282
+SASL_PLAINTEXT transport layer, 268
+SASL_SSL
+SCRAM used with, 282
+use with SASL/GSSAPI, 277
+SASL_SSL transport layer, 268
+scalability
+in Kafka Streams, 416
+Kafka's flexible scalability, 11
+scaling storage independent of memory and
+CPUs in cluster, 150
+scaling a topology, 412
+schemas, 5
+Avro compatibility rules for, 65
+data sources and sinks, 206
+data, in Connect API, 227
+key and value converters, 212
+loss of schema metadata in data pipelines,
+209
+schema.registry.url parameter, 110
+storing Avro schema in Schema Registry, 65
+support by Confluent Replicator, 261
+SCRAM (Salted Challenge Response Authenti‐
+cation Mechanism), 281
+(see also SASL/SCRAM)
+SCRAM-SHA-256, 288
+secret management systems, 208
+Secure Sockets Layer (see SSL)
+security
+concerns for data pipeliines, 208
+Kafka, 265-304
+auditing, 298
+authentication, 269-289
+authorization, 291-298
+encryption, 289-291
+locking down Kafka, 265-268
+security protocols, 268-269
+MirrorMaker, 252
+securing the platform, 301-303
+password protection, 301
+ZooKeeper, 299-301
+authorization, 301
+SASL, 299
+SSL, 300
+security.inter.broker.protocol parameter, 269
+seekToBeginning method, 104
+seekToEnd method, 104
+self-signed CA
+key and trust stores for client and server
+authentication, 271
+send acknowledgments, 170
+(see also acks parameter)
+send method
+synchronous and asynchronous, 51
+synchronous send, 52
+time to succeed or fail, 56
+using async Producer.send, sending mes‐
+sages faster than they're accepted, 75

@@ -1,0 +1,200 @@
+the data further down the pipe. If the person who built the pipeline between Mon‐
+goDB and MySQL decided to filter certain events or remove fields from records, all
+the users and applications who access the data in MySQL will only have access to par‐
+tial data. If they require access to the missing fields, the pipeline needs to be rebuilt,
+and historical data will require reprocessing (assuming it is available).
+ELT stands for Extract-Load-Transform and means that the data pipeline does only
+minimal transformation (mostly around data type conversion), with the goal of mak‐
+ing sure the data that arrives at the target is as similar as possible to the source data.
+In these systems, the target system collects “raw data” and all required processing is
+done at the target system. The benefit here is that the system provides maximum flex‐
+ibility to users of the target system, since they have access to all the data. These sys‐
+tems also tend to be easier to troubleshoot since all data processing is limited to one
+system rather than split between the pipeline and additional applications. The draw‐
+back is that the transformations take CPU and storage resources at the target system.
+In some cases, these systems are expensive and there is strong motivation to move
+computation off those systems when possible.
+Kafka Connect includes the Single Message Transformation feature, which trans‐
+forms records while they are being copied from a source to Kafka, or from Kafka to a
+target. This includes routing messages to different topics, filtering messages, chang‐
+ing data types, redacting specific fields, and more. More complex transformations
+that involve joins and aggregations are typically done using Kafka Streams, and we
+will explore those in detail in a separate chapter.
+Considerations When Building Data Pipelines | 207
+
+=== PAGE 237 ===
+When building an ETL system with Kafka, keep in mind that Kafka
+allows you to build one-to-many pipelines, where the source data
+is written to Kafka once and then consumed by multiple applica‐
+tions and written to multiple target systems. Some preprocessing
+and cleanup is expected, such as standardizing timestamps and
+data types, adding lineage, and perhaps removing personal
+information—transformations that will benefit all consumers of the
+data. But don’t prematurely clean and optimize the data on ingest
+because it might be needed less refined elsewhere.
+Security
+Security should always be a concern. In terms of data pipelines, the main security
+concerns are usually:
+• Who has access to the data that is ingested into Kafka?
+• Can we make sure the data going through the pipe is encrypted? This is mainly a
+concern for data pipelines that cross datacenter boundaries.
+• Who is allowed to make modifications to the pipelines?
+• If the data pipeline needs to read or write from access-controlled locations, can it
+authenticate properly?
+• Is our PII (Personally Identifiable Information) handling compliant with laws
+and regulations regarding its storage, access and use?
+Kafka allows encrypting data on the wire, as it is piped from sources to Kafka and
+from Kafka to sinks. It also supports authentication (via SASL) and authorization—so
+you can be sure that if a topic contains sensitive information, it can’t be piped into
+less secured systems by someone unauthorized. Kafka also provides an audit log to
+track access—unauthorized and authorized. With some extra coding, it is also possi‐
+ble to track where the events in each topic came from and who modified them, so you
+can provide the entire lineage for each record.
+Kafka security is discussed in detail in Chapter 11. However, Kafka Connect and its
+connectors need to be able to connect to, and authenticate with, external data sys‐
+tems, and configuration of connectors will include credentials for authenticating with
+external data systems.
+These days it is not recommended to store credentials in configuration files, since this
+means that the configuration files have to be handled with extra care and have restric‐
+ted access. A common solution is to use an external secret management system such
+as HashiCorp Vault. Kafka Connect includes support for external secret configura‐
+tion. Apache Kafka only includes the framework that allows introduction of plugga‐
+ble external config providers, an example provider that reads configuration from a
+208 | Chapter 9: Building Data Pipelines
+
+=== PAGE 238 ===
+file, and there are community-developed external config providers that integrate with
+Vault, AWS, and Azure.
+Failure Handling
+Assuming that all data will be perfect all the time is dangerous.  It is important to plan
+for failure handling in advance. Can we prevent faulty records from ever making it
+into the pipeline? Can we recover from records that cannot be parsed? Can bad
+records get fixed (perhaps by a human) and reprocessed? What if the bad event looks
+exactly like a normal event and you only discover the problem a few days later?
+Because Kafka can be configured to store all events for long periods of time, it is pos‐
+sible to go back in time and recover from errors when needed. This also allows
+replaying the events stored in Kafka to the target system if they were lost.
+Coupling and Agility
+A desirable characteristic of data pipeline implementation is to decouple the data
+sources and data targets. There are multiple ways accidental coupling can happen:
+Ad hoc pipelines
+Some companies end up building a custom pipeline for each pair of applications
+they want to connect. For example, they use Logstash to dump logs to Elastic‐
+search, Flume to dump logs to HDFS, Oracle GoldenGate to get data from Oracle
+to HDFS, Informatica to get data from MySQL and XML to Oracle, and so on.
+This tightly couples the data pipeline to the specific end points and creates a mess
+of integration points that requires significant effort to deploy, maintain, and
+monitor. It also means that every new system the company adopts will require
+building additional pipelines, increasing the cost of adopting new technology,
+and inhibiting innovation.
+Loss of metadata
+If the data pipeline doesn’t preserve schema metadata and does not allow for
+schema evolution, you end up tightly coupling the software producing the data at
+the source and the software that uses it at the destination.  Without schema infor‐
+mation, both software products need to include information on how to parse the
+data and interpret it. If data flows from Oracle to HDFS and a DBA added a new
+field in Oracle without preserving schema information and allowing schema evo‐
+lution, either every app that reads data from HDFS will break or all the develop‐
+ers will need to upgrade their applications at the same time. Neither option is
+agile. With support for schema evolution in the pipeline, each team can modify
+their applications at their own pace without worrying that things will break down
+the line.
+Considerations When Building Data Pipelines | 209
+
+=== PAGE 239 ===
+Extreme processing
+As we mentioned when discussing data transformations, some processing of data
+is inherent to data pipelines. After all, we are moving data between different sys‐
+tems where different data formats make sense and different use cases are sup‐
+ported. However, too much processing ties all the downstream systems to
+decisions made when building the pipelines about which fields to preserve, how
+to aggregate data, etc. This often leads to constant changes to the pipeline as
+requirements of downstream applications change, which isn’t agile, efficient, or
+safe. The more agile way is to preserve as much of the raw data as possible and
+allow downstream apps, including Kafka Streams apps, to make their own deci‐
+sions regarding data processing and aggregation.
+When to Use Kafka Connect Versus Producer
+and Consumer
+When writing to Kafka or reading from Kafka, you have the choice between using
+traditional producer and consumer clients, as described in Chapters 3 and 4, or using
+the Kafka Connect API and the connectors, as we’ll describe in the following sections. 
+Before we start diving into the details of Kafka Connect, you may already be wonder‐
+ing, “When do I use which?”
+As we’ve seen, Kafka clients are clients embedded in your own application. It allows
+your application to write data to Kafka or to read data from Kafka. Use Kafka clients
+when you can modify the code of the application that you want to connect an appli‐
+cation to and when you want to either push data into Kafka or pull data from Kafka.
+Y ou will use Connect to connect Kafka to datastores that you did not write and whose
+code or APIs you cannot or will not modify. Connect will be used to pull data from
+the external datastore into Kafka or push data from Kafka to an external store. To use
+Kafka Connect, you need a connector for the datastore to which you want to connect,
+and nowadays these connectors are plentiful. This means that in practice, users of
+Kafka Connect only need to write configuration files.
+If you need to connect Kafka to a datastore and a connector does not exist yet, you
+can choose between writing an app using the Kafka clients or the Connect API. Con‐
+nect is recommended because it provides out-of-the-box features like configuration
+management, offset storage, parallelization, error handling, support for different data
+types, and standard management REST APIs. Writing a small app that connects
+Kafka to a datastore sounds simple, but there are many little details you will need to
+handle concerning data types and configuration that make the task nontrivial. What’s
+more, you will need to maintain this pipeline app and document it, and your
+teammates will need to learn how to use it. Kafka Connect is a standard part of the
+210 | Chapter 9: Building Data Pipelines
+
+=== PAGE 240 ===
+Kafka ecosystem, and it handles most of this for you, allowing you to focus on trans‐
+porting data to and from the external stores.
+Kafka Connect
+Kafka Connect is a part of Apache Kafka and provides a scalable and reliable way to
+copy data between Kafka and other datastores. It provides APIs and a runtime to
+develop and run connector plug-ins—libraries that Kafka Connect executes and that
+are responsible for moving the data. Kafka Connect runs as a cluster of worker pro‐
+cesses. Y ou install the connector plug-ins on the workers and then use a REST API to
+configure and manage connectors, which run with a specific configuration. Connectors
+start additional tasks to move large amounts of data in parallel and use the available
+resources on the worker nodes more efficiently. Source connector tasks just need to
+read data from the source system and provide Connect data objects to the worker
+processes. Sink connector tasks get connector data objects from the workers and are
+responsible for writing them to the target data system.  Kafka Connect uses convertors
+to support storing those data objects in Kafka in different formats—JSON format
+support is part of Apache Kafka, and the Confluent Schema Registry provides Avro,
+Protobuf, and JSON Schema converters. This allows users to choose the format in
+which data is stored in Kafka independent of the connectors they use, as well as how
+the schema of the data is handled (if at all).
+This chapter cannot possibly get into all the details of Kafka Connect and its many
+connectors. This could fill an entire book on its own. We will, however, give an over‐
+view of Kafka Connect and how to use it, and point to additional resources for
+reference.
+Running Kafka Connect
+Kafka Connect ships with Apache Kafka, so there is no need to install it separately.
+For production use, especially if you are planning to use Connect to move large
+amounts of data or run many connectors, you should run Connect on separate
+servers from your Kafka brokers. In this case, install Apache Kafka on all the
+machines, and simply start the brokers on some servers and start Connect on other
+servers.
+Starting a Connect worker is very similar to starting a broker—you call the start
+script with a properties file:
+ bin/connect-distributed.sh config/connect-distributed.properties
+There are a few key configurations for Connect workers:
+Kafka Connect | 211
+
+=== PAGE 241 ===
+bootstrap.servers
+A list of Kafka brokers that Connect will work with. Connectors will pipe their
+data either to or from those brokers. Y ou don’t need to specify every broker in the
+cluster, but it’s recommended to specify at least three.
+group.id
+All workers with the same group ID are part of the same Connect cluster.  A con‐
+nector started on the cluster will run on any worker, and so will its tasks.
+plugin.path
+Kafka Connect uses a pluggable architecture where connectors, converters, trans‐
+formations, and secret providers can be downloaded and added to the platform.
+In order to do this, Kafka Connect has to be able to find and load those plug-ins.
+We can configure one or more directories as locations where connectors
+and their dependencies can be found. For example, we can configure
+plugin.path=/opt/connectors,/home/gwenshap/connectors. Inside one of
+these directories, we will typically create a subdirectory for each connector, so
+in the previous example, we’ll create /opt/connectors/jdbc and /opt/
+connectors/elastic. Inside each subdirectory, we’ll place the connector jar itself
+and all its dependencies. If the connector ships as an uberJar and has no depen‐
+dencies, it can be placed directly in plugin.path and doesn’t require a subdirec‐

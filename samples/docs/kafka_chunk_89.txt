@@ -1,0 +1,200 @@
+MessageReader class, 322
+messages, 4
+batch headers in Kafka, 153
+compression, 59
+coordinating size configurations, 33
+format down conversion, 155
+format in stored files, 153
+formatter, specifying for console consumer,
+324
+schema for, 5
+messages in rate, 359
+messaging
+publish/subscribe, 1
+use of Kafka for, 13
+metadata
+consumer group, added to transaction
+metadata, 189
+Index | 445
+
+=== PAGE 475 ===
+loss of in data pipelines, causing coupling,
+209
+Metadata request and response, 148
+ownership of, 138
+problems with, leading to replacement of
+controller, 138
+metadata requests, 144
+MetadataFetch API, 139
+metrics, 339-343
+application health checks, 343
+deciding which metrics you need, 341-342
+alerting or debugging metrics, 341
+consumer of metrics, automation or
+human, 342
+historical metrics, 342
+Kafka broker, 346-370
+sources of, 339
+application metrics from JMX interface,
+339
+nonapplication metrics, 340
+using Kafka to collect, 13
+microservices
+Kafka transactions and, 192
+min.compaction.lag.ms parameter, 159
+min.insync.replicas parameter, 32, 168, 246,
+318
+mirroring, 233
+(see also cross-cluster data mirroring)
+after the failover, 245
+challenge of active-active mirroring, 239
+MirrorMaker, 9, 233, 247-259
+configuring, 249
+deploying in production, 253-256
+exactly-once capabilities in version 2.0, 192
+lightweight, 335
+multicluster replication topology, 251
+securing, 252
+tuning, 257-259
+version 2.0, 247
+MockAdminClient class, 131-133
+Mockito framework, 132
+spy injection and doReturn methods, 132
+monitoring, 14, 339-379
+client monitoring, 370-376
+end-to-end, 378
+Kafka as monitoring system, 347
+Kafka broker metrics, 346-370
+Kafka's features for, 15
+lag, 377
+metric basics, 339-343
+deciding which metrics you need, 341
+sources of metrics, 339
+of MirrorMaker in production, 254
+of reliability in production, 178-179
+service-level objectives, 343-346
+tools for, 430
+Multi-Region Clusters (MRC), 261
+features supported, 261
+multicluster architectures, 235-247
+active-active, 238-240
+active-standby, 240-245
+hub-and-spoke, 236-238
+multicluster replication topology, 251
+realities of cross-datacenter communication,
+235
+stretch clusters, 246
+multiphase processing/repartitioning, 395
+MySQL data pipeline to Snowflake, 206
+MySQL to Elasticsearch connector example,
+216-222
+N
+Narkhede, Neha, 15
+network threads, 355
+networking, 35
+improving network utiliation when reas‐
+signing replicas, 330
+introducing network faults, 178
+Linux, tuning for Kafka clusters, 41
+monitoring network utilization on brokers,
+369
+problems with, hardware and configuration
+issues, 353
+NoOpMessageFormatter, 324
+NotEnoughReplicasException, 168
+notifications, 13
+num.partitions parameter, 28
+num.recovery.threads.per.data.dir configura‐
+tion, 26
+O
+OAuth 2.0, 283
+(see also SASL/OAUTHBEARER)
+observers, 262
+offline partitions count, 360
+OffsetCommitRequest, 148
+OffsetFetchRequest, 148
+offsets, 7
+446 | Index
+
+=== PAGE 476 ===
+auto.offset.reset parameter, 91
+committing for records in a transaction, 199
+committing offsets and records in a transac‐
+tion, 191, 192
+consumer offset migration in MirrorMaker,
+250
+consumers committing, 94-101
+asynchronous commit, 97
+automatic commit, 95
+combining synchronous and asynchro‐
+nous commits, 99
+committing a specified offset, 100
+committing current offset, 96
+consumers using ZooKeeper to commit, 45
+consuming records with specific offsets, 104
+enable.auto.commit parameter, 91
+explicitly committing in consumers,
+174-176
+index mapping timestamps to, 156
+index mapping to segment files and posi‐
+tions in the file, 155
+listOffsets method, 128
+management by workers for source and sink
+connectors, 228
+managing for consumer group, 314
+exporting offsets, 314
+importing offsets, 314
+modifying for consumer groups, 125-126
+request types for, 148
+retrieving by timestamp, 31
+source task storing for source records, 226
+start offset for applications after failover,
+242
+translation, 244
+workers committing for source and sink
+connectors, 227
+offsets.retention.minutes parameter, 93
+online transaction processing (OLTP), 384
+open source project (Kafka), 16
+OpenFileDescriptorCount, 367
+operating systems
+choosing OS for Kafka, 19
+Java OS monitoring, 367
+network configuration problems as OS
+issues, 353
+OS metrics, 347, 351
+OS monitoring, 367
+other than Linux, installing Kafka on, 421
+operational-level agreement (OLA), 344
+Options object argument, AdminClient meth‐
+ods, 114
+Oracle JDK, 19
+order of messages within a partition, 60, 162,
+163
+org.apache.kafka.tools package, configuration
+validation tools, 176
+out-of-sequence events, 399
+out-of-sync replicas, 141, 163
+becoming leader replica, 167
+outbox pattern, 192
+ownership of partitions, 7
+P
+partition count metric, 359
+partition.assignment.strategy parameter, 91
+PartitionAssignor, 83
+Partitioner interface
+partition method, 70
+partitioners, 49
+partitions, 5, 68-71, 163
+adding for a topic, 127, 310
+allocation of, 151
+assigning to consumers, how it works, 83
+assignment strategies, 91
+assignment to standalone consumer, 110
+checking for a topic, 118
+choosing number of, 28
+clean and dirty portions, 156
+compacting, 157
+segment before and after compaction,
+158
+finding topic partitions that may have prob‐

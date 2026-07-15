@@ -1,0 +1,200 @@
+ers can choose to receive acknowledgments of sent messages when the message
+was fully committed, when it was written to the leader, or when it was sent over
+the network.
+• Messages that are committed will not be lost as long as at least one replica
+remains alive.
+• Consumers can only read messages that are committed.
+These basic guarantees can be used while building a reliable system, but in them‐
+selves, they don’t make the system fully reliable. There are trade-offs involved in
+building a reliable system, and Kafka was built to allow administrators and develop‐
+ers to decide how much reliability they need by providing configuration parameters
+that allow controlling these trade-offs. The trade-offs usually involve how important
+it is to reliably and consistently store messages versus other important considerations,
+such as availability, high throughput, low latency, and hardware costs.
+162 | Chapter 7: Reliable Data Delivery
+
+=== PAGE 192 ===
+We next review Kafka’s replication mechanism, introduce terminology, and discuss
+how reliability is built into Kafka. After that, we go over the configuration parameters
+we just mentioned.
+Replication
+Kafka’s replication mechanism, with its multiple replicas per partition, is at the core
+of all of Kafka’s reliability guarantees. Having a message written in multiple replicas is
+how Kafka provides durability of messages in the event of a crash.
+We explained Kafka’s replication mechanism in depth in Chapter 6, but let’s recap the
+highlights here.
+Each Kafka topic is broken down into partitions, which are the basic data building
+blocks. A partition is stored on a single disk. Kafka guarantees the order of events
+within a partition, and a partition can be either online (available) or offline (unavail‐
+able). Each partition can have multiple replicas, one of which is a designated leader.
+All events are produced to the leader replica and are usually consumed from the
+leader replica as well. Other replicas just need to stay in sync with the leader and rep‐
+licate all the recent events on time. If the leader becomes unavailable, one of the in-
+sync replicas becomes the new leader (there is an exception to this rule, which we
+discussed in Chapter 6).
+A replica is considered in sync if it is the leader for a partition, or if it is a follower
+that:
+• Has an active session with ZooKeeper—meaning that it sent a heartbeat to Zoo‐
+Keeper in the last 6 seconds (configurable).
+• Fetched messages from the leader in the last 10 seconds (configurable).
+• Fetched the most recent messages from the leader in the last 10 seconds. That is,
+it isn’t enough that the follower is still getting messages from the leader; it must
+have had no lag at least once in the last 10 seconds (configurable).
+If a replica loses connection to ZooKeeper, stops fetching new messages, or falls
+behind and can’t catch up within 10 seconds, the replica is considered out of sync. An
+out-of-sync replica gets back into sync when it connects to ZooKeeper again and
+catches up to the most recent message written to the leader. This usually happens
+quickly after a temporary network glitch is healed but can take a while if the broker
+the replica is stored on was down for a longer period of time.
+Replication | 163
+
+=== PAGE 193 ===
+Out-of-Sync Replicas
+In older versions of Kafka, it was not uncommon to see one or
+more replicas rapidly flip between in-sync and out-of-sync status.
+This was a sure sign that something was wrong with the cluster. A
+relatively common cause was a large maximum request size and
+large JVM heap that required tuning to prevent long garbage col‐
+lection pauses that would cause the broker to temporarily discon‐
+nect from ZooKeeper. These days the problem is very rare,
+especially when using Apache Kafka release 2.5.0 and higher with
+its default configurations for ZooKeeper connection timeout and
+maximum replica lag. The use of JVM version 8 and above (now
+the minimum version supported by Kafka) with G1 garbage collec‐
+tor helped curb this problem, although tuning may still be required
+for large messages. Generally speaking, Kafka’s replication protocol
+became significantly more reliable in the years since the first edi‐
+tion of the book was published. For details on the evolution of Kaf‐
+ka’s replication protocol, refer to Jason Gustafson’s excellent talk,
+“Hardening Apache Kafka Replication” , and Gwen Shapira’s over‐
+view of Kafka improvements, “Please Upgrade Apache Kafka
+Now”.
+An in-sync replica that is slightly behind can slow down producers and consumers—
+since they wait for all the in-sync replicas to get the message before it is committed.
+Once a replica falls out of sync, we no longer wait for it to get messages. It is still
+behind, but now there is no performance impact. The catch is that with fewer in-sync
+replicas, the effective replication factor of the partition is lower, and therefore there is
+a higher risk for downtime or data loss.
+In the next section, we will look at what this means in practice.
+Broker Configuration
+There are three configuration parameters in the broker that change Kafka’s behavior
+regarding reliable message storage. Like many broker configuration variables, these
+can apply at the broker level, controlling configuration for all topics in the system,
+and at the topic level, controlling behavior for a specific topic.
+Being able to control reliability trade-offs at the topic level means that the same Kafka
+cluster can be used to host reliable and nonreliable topics. For example, at a bank, the
+administrator will probably want to set very reliable defaults for the entire cluster but
+make an exception to the topic that stores customer complaints where some data loss
+is acceptable.
+Let’s look at these configuration parameters one by one and see how they affect the
+reliability of message storage in Kafka and the trade-offs involved.
+164 | Chapter 7: Reliable Data Delivery
+
+=== PAGE 194 ===
+Replication Factor
+The topic-level configuration is replication.factor. At the broker level, we control
+the default.replication.factor for automatically created topics.
+Until this point in the book, we have assumed that topics had a replication factor of
+three, meaning that each partition is replicated three times on three different brokers.
+This was a reasonable assumption, as this is Kafka’s default, but this is a configuration
+that users can modify. Even after a topic exists, we can choose to add or remove repli‐
+cas and thereby modify the replication factor using Kafka’s replica assignment tool.
+A replication factor of N allows us to lose N-1 brokers while still being able to read
+and write data to the topic. So a higher replication factor leads to higher availability,
+higher reliability, and fewer disasters. On the flip side, for a replication factor of N, we
+will need at least N brokers and we will store N copies of the data, meaning we will
+need N times as much disk space. We are basically trading availability for hardware.
+So how do we determine the right number of replicas for a topic?  There are a few key
+considerations:
+Availability
+A partition with just one replica will become unavailable even during a routine
+restart of a single broker. The more replicas we have, the higher availability we
+can expect.
+Durability
+Each replica is a copy of all the data in a partition. If a partition has a single rep‐
+lica and the disk becomes unusable for any reason, we’ve lost all the data in the
+partition. With more copies, especially on different storage devices, the probabil‐
+ity of losing all of them is reduced.
+Throughput
+With each additional replica, we multiply the inter-broker traffic.  If we produce
+to a partition at a rate of 10 MBps, then a single replica will not generate any rep‐
+lication traffic. If we have 2 replicas, then we’ll have 10 MBps replication traffic,
+with 3 replicas it will be 20 MBps, and with 5 replicas it will be 40 MBps. We need
+to take this into account when planning the cluster size and capacity.
+End-to-end latency
+Each produced record has to be replicated to all in-sync replicas before it is avail‐
+able for consumers. In theory, with more replicas, there is higher probability that
+one of these replicas is a bit slow and therefore will slow the consumers down. In
+practice, if one broker becomes slow for any reason, it will slow down every cli‐
+ent that tries using it, regardless of replication factor.
+Broker Configuration | 165
+
+=== PAGE 195 ===
+Cost
+This is the most common reason for using a replication factor lower than 3 for
+noncritical data. The more replicas we have of our data, the higher the storage
+and network costs. Since many storage systems already replicate each block 3
+times, it sometimes makes sense to reduce costs by configuring Kafka with a rep‐
+lication factor of 2. Note that this will still reduce availability compared to a repli‐
+cation factor of 3, but durability will be guaranteed by the storage device.
+Placement of replicas is also very important. Kafka will always make sure each replica
+for a partition is on a separate broker. In some cases, this is not safe enough. If all
+replicas for a partition are placed on brokers that are on the same rack, and the top-
+of-rack switch misbehaves, we will lose availability of the partition regardless of the
+replication factor. To protect against rack-level misfortune, we recommend placing
+brokers in multiple racks and using the broker.rack broker configuration parameter
+to configure the rack name for each broker. If rack names are configured, Kafka will
+make sure replicas for a partition are spread across multiple racks in order to guaran‐
+tee even higher availability. When running Kafka in cloud environments, it is com‐
+mon to consider availability zones as separate racks. In Chapter 6, we provided details
+on how Kafka places replicas on brokers and racks.
+Unclean Leader Election
+This configuration is only available at the broker (and in practice, cluster-wide) level.
+The parameter name is unclean.leader.election.enable, and by default it is set to
+false.
+As explained earlier, when the leader for a partition is no longer available, one of the
+in-sync replicas will be chosen as the new leader. This leader election is “clean” in the
+sense that it guarantees no loss of committed data—by definition, committed data
+exists on all in-sync replicas.
+But what do we do when no in-sync replica exists except for the leader that just
+became unavailable?
+This situation can happen in one of two scenarios:
+• The partition had three replicas, and the two followers became unavailable (let’s
+say two brokers crashed). In this situation, as producers continue writing to the
+leader, all the messages are acknowledged and committed (since the leader is the
+one and only in-sync replica). Now let’s say that the leader becomes unavailable
+(oops, another broker crash). In this scenario, if one of the out-of-sync followers
+starts first, we have an out-of-sync replica as the only available replica for the
+partition.
+• The partition had three replicas, and due to network issues, the two followers fell
+behind so that even though they are up and replicating, they are no longer in
+166 | Chapter 7: Reliable Data Delivery
+
+=== PAGE 196 ===
+sync. The leader keeps accepting messages as the only in-sync replica.  Now if the
+leader becomes unavailable, there are only out-of-sync replicas available to
+become leaders.
+In both these scenarios, we need to make a difficult decision:
+• If we don’t allow the out-of-sync replica to become the new leader, the partition
+will remain offline until we bring the old leader (and the last in-sync replica)
+back online. In some cases (e.g., memory chip needs replacement), this can take
+many hours.
+• If we do allow the out-of-sync replica to become the new leader, we are going to
+lose all messages that were written to the old leader while that replica was out of
+sync and also cause some inconsistencies in consumers. Why? Imagine that while
+replicas 0 and 1 were not available, we wrote messages with offsets 100–200 to
+replica 2 (then the leader). Now replica 2 is unavailable and replica 0 is back
+online. Replica 0 only has messages 0–100 but not 100–200. If we allow replica 0
+to become the new leader, it will allow producers to write new messages and
+allow consumers to read them. So, now the new leader has completely new mes‐
+sages 100–200. First, let’s note that some consumers may have read the old
+messages 100–200, some consumers got the new 100–200, and some got a mix of
+both. This can lead to pretty bad consequences when looking at things like
+downstream reports. In addition, replica 2 will come back online and become a
+follower of the new leader. At that point, it will delete any messages it got that
+don’t exist on the current leader. Those messages will not be available to any con‐
+sumer in the future.
+In summary, if we allow out-of-sync replicas to become leaders, we risk data loss and
+inconsistencies. If we don’t allow them to become leaders, we face lower availability as
+we must wait for the original leader to become available before the partition is back
+online.

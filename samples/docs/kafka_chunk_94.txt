@@ -1,0 +1,78 @@
+137
+restricted access for security of authoriza‐
+tion, 297
+securing, 299-301
+authorization, 301
+SSL, 300
+zookeeper.connect parameter, 25, 38
+zookeeper.session.timeout.ms parameter, 168
+Index | 455
+
+=== PAGE 485 ===
+About the Authors
+Gwen Shapira is an engineering leader at Confluent, leading the cloud native Kafka
+team, which focuses on making Kafka more elastic, scalable, and multitenant for
+Confluent Cloud. She has 15 years of experience working with code and customers to
+build scalable data architectures. Gwen is a frequent presenter at industry conferences
+and a PMC member on the Apache Kafka project.
+Todd Palino is a principal staff engineer in site reliability at LinkedIn, tackling the
+challenges of managing capacity and efficiency for the entire platform. Previously, he
+was responsible for architecture, day-to-day operations, and tools development for
+Kafka and ZooKeeper at LinkedIn, including the creation of an advanced monitoring
+and notification system. Todd is the developer of the open source project Burrow, a
+Kafka consumer monitoring tool, and can be found sharing his experience on SRE at
+industry conferences and tech talks. Todd has spent over 20 years in the technology
+industry running infrastructure services, including as a Systems Engineer at Verisign,
+developing service management automation for DNS, networking, and hardware
+management, as well as managing hardware and software standards across the
+company.
+Rajini Sivaram is a principal engineer at Confluent, designing and developing cross-
+cluster replication features for Kafka and security features for Confluent Platform and
+Confluent Cloud. She is an Apache Kafka Committer and member of the Apache
+Kafka Program Management Committee. Prior to joining Confluent, she was at Pivo‐
+tal, building a high-performance reactive API for Kafka based on Project Reactor.
+Earlier, Rajini was at IBM working on Kafka-as-a-Service for the IBM Bluemix plat‐
+form. Her experience ranges from parallel and distributed systems to Java virtual
+machines and messaging systems.
+Krit Petty is the site reliability engineering manager for Kafka at LinkedIn. Before
+becoming manager, he worked as an SRE on the team, expanding and increasing
+Kafka to overcome the hurdles associated with scaling Kafka to never-before-seen
+heights, including taking the first steps to moving LinkedIn’s large-scale Kafka
+deployments into Microsoft’s Azure cloud. Krit has a master’s degree in computer sci‐
+ence and previously worked managing Linux systems, and as a software engineer
+developing software for high-performance computing projects in the oil and gas
+industry.
+
+=== PAGE 486 ===
+Colophon
+The animal on the cover of Kafka: The Definitive Guide is a blue-winged kookaburra
+(Dacelo leachii). It is part of the Alcedinidae family and can be found in southern
+New Guinea and the less dry area of northern Australia. They are considered to be
+river kingfisher birds.
+The male kookaburra has a colorful look. The lower wing and tail feathers are blue,
+hence its name, but tails of females are reddish-brown with black bars. Both sexes
+have cream-colored undersides with streaks of brown, and white irises in their eyes.
+Adult kookaburras are smaller than other kingfishers at just 15 to 17 inches in length
+and, on average, weigh about 260 to 330 grams.
+The diet of the blue-winged kookaburra is heavily carnivorous, with prey varying
+slightly given changing seasons. For example, in the summer months there is a larger
+abundance of lizards, insects, and frogs that this bird feeds on, but drier months
+introduce more crayfish, fish, rodents, and even smaller birds into their diet. They’re
+not alone in eating other birds, however, as red goshawks and rufous owls have the
+blue-winged kookaburra on their menu when in season.
+Breeding for the blue-winged kookaburra occurs in the months of September
+through December. Nests are built in hollows in the high parts of trees. Raising young
+is a community effort; there is at least one helper bird assisting Mom and Dad. Three
+to four eggs are laid and incubated for about 26 days. Chicks will fledge around 36
+days after hatching—if they survive. Older siblings have been known to kill the
+younger ones in their aggressive and competitive first week of life. Those who aren’t
+victims of fratricide or other causes of death will be trained by their parents to hunt
+for 6 to 10 weeks before heading off on their own.
+Many of the animals on O’Reilly covers are endangered; all of them are important to
+the world. To learn more about how you can help, go to animals.oreilly.com.
+Color illustration by Karen Montgomery, based on a black and white engraving from
+English Cyclopaedia. The cover fonts are Gilroy Semibold and Guardian Sans. The
+text font is Adobe Minion Pro; the heading font is Adobe Myriad Condensed; and the
+code font is Dalton Maag’s Ubuntu Mono.
+
+

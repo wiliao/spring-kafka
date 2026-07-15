@@ -1,0 +1,200 @@
+• If acks is set to all, are there enough in-sync replicas for safely writing the mes‐
+sage? (Brokers can be configured to refuse new messages if the number of in-sync
+replicas falls below a configurable number; we will discuss this in more detail in
+Chapter 7, when we discuss Kafka’s durability and reliability guarantees.)
+Then the broker will write the new messages to local disk. On Linux, the messages are
+written to the filesystem cache, and there is no guarantee about when they will be
+written to disk. Kafka does not wait for the data to get persisted to disk—it relies on
+replication for message durability.
+Once the message is written to the leader of the partition, the broker examines the
+acks configuration: if acks is set to 0 or 1, the broker will respond immediately; if
+acks is set to all, the request will be stored in a buffer called purgatory until the
+leader observes that the follower replicas replicated the message, at which point a
+response is sent to the client.
+Fetch Requests
+Brokers process fetch requests in a way that is very similar to how produce requests
+are handled. The client sends a request, asking the broker to send messages from a list
+of topics, partitions, and offsets—something like “Please send me messages starting at
+offset 53 in partition 0 of topic Test and messages starting at offset 64 in partition 3 of
+topic Test. ” Clients also specify a limit to how much data the broker can return for
+each partition. The limit is important because clients need to allocate memory that
+will hold the response sent back from the broker. Without this limit, brokers could
+send back replies large enough to cause clients to run out of memory.
+As we’ve discussed earlier, the request has to arrive to the leaders of the partitions
+specified in the request, and the client will make the necessary metadata requests to
+make sure it is routing the fetch requests correctly. When the leader receives the
+request, it first checks if the request is valid—does this offset even exist for this partic‐
+ular partition? If the client is asking for a message that is so old it got deleted from the
+partition or an offset that does not exist yet, the broker will respond with an error.
+If the offset exists, the broker will read messages from the partition, up to the limit set
+by the client in the request, and send the messages to the client. Kafka famously uses a
+zero-copy method to send the messages to the clients—this means that Kafka sends
+messages from the file (or more likely, the Linux filesystem cache) directly to the
+Request Processing | 145
+
+=== PAGE 175 ===
+network channel without any intermediate buffers. This is different than most data‐
+bases where data is stored in a local cache before being sent to clients. This technique
+removes the overhead of copying bytes and managing buffers in memory, and results
+in much improved performance.
+In addition to setting an upper boundary on the amount of data the broker can
+return, clients can also set a lower boundary on the amount of data returned. Setting
+the lower boundary to 10K, for example, is the client’s way of telling the broker, “Only
+return results once you have at least 10K bytes to send me. ” This is a great way to
+reduce CPU and network utilization when clients are reading from topics that are not
+seeing much traffic. Instead of the clients sending requests to the brokers every few
+milliseconds asking for data and getting very few or no messages in return, the clients
+send a request, the broker waits until there is a decent amount of data, and returns
+the data, and only then will the client ask for more ( Figure 6-3). The same amount of
+data is read overall but with much less back-and-forth and therefore less overhead.
+Figure 6-3. Broker delaying response until enough data accumulated
+Of course, we wouldn’t want clients to wait forever for the broker to have enough
+data. After a while, it makes sense to just take the data that exists and process that
+instead of waiting for more. Therefore, clients can also define a timeout to tell the
+broker, “If you didn’t satisfy the minimum amount of data to send within x milli‐
+seconds, just send what you got. ”
+It is interesting to note that not all the data that exists on the leader of the partition is
+available for clients to read. Most clients can only read messages that were written to
+all in-sync replicas (follower replicas, even though they are consumers, are exempt
+from this—otherwise replication would not work). We already discussed that the
+leader of the partition knows which messages were replicated to which replica, and
+until a message was written to all in-sync replicas, it will not be sent to consumers—
+attempts to fetch those messages will result in an empty response rather than an error.
+The reason for this behavior is that messages not replicated to enough replicas yet are
+considered “unsafe”—if the leader crashes and another replica takes its place, these
+messages will no longer exist in Kafka. If we allowed clients to read messages that
+only exist on the leader, we could see inconsistent behavior. For example, if a
+146 | Chapter 6: Kafka Internals
+
+=== PAGE 176 ===
+consumer reads a message and the leader crashed and no other broker contained this
+message, the message is gone. No other consumer will be able to read this message,
+which can cause inconsistency with the consumer who did read it. Instead, we wait
+until all the in-sync replicas get the message and only then allow consumers to read
+it (Figure 6-4). This behavior also means that if replication between brokers is slow
+for some reason, it will take longer for new messages to arrive to consumers (since
+we wait for the messages to replicate first). This delay is limited to
+replica.lag.time.max.ms—the amount of time a replica can be delayed in replicat‐
+ing new messages while still being considered in sync.
+Figure 6-4. Consumers only see messages that were replicated to in-sync replicas
+In some cases, a consumer consumes events from a large number of partitions. Send‐
+ing the list of all the partitions it is interested in to the broker with every request and
+having the broker send all its metadata back can be very inefficient—the set of parti‐
+tions rarely changes, their metadata rarely changes, and in many cases there isn’t that
+much data to return. To minimize this overhead, Kafka has fetch session cache .
+Consumers can attempt to create a cached session that stores the list of partitions
+they are consuming from and its metadata. Once a session is created, consumers no
+longer need to specify all the partitions in each request and can use incremental fetch
+requests instead. Brokers will only include metadata in the response if there were any
+changes. The session cache has limited space, and Kafka prioritizes follower replicas
+and consumers with a large set of partitions, so in some cases a session will not be
+created or will be evicted. In both these cases the broker will return an appropriate
+error to the client, and the consumer will transparently resort to full fetch requests
+that include all the partition metadata.
+Other Requests
+We just discussed the most common types of requests used by Kafka clients:
+Metadata, Produce, and Fetch. The Kafka protocol currently handles 61 different
+request types, and more will be added. Consumers alone use 15 request types to form
+groups, coordinate consumption, and allow developers to manage the consumer
+groups. There are also large numbers of requests that are related to metadata manage‐
+ment and security.
+Request Processing | 147
+
+=== PAGE 177 ===
+In addition, the same protocol is used to communicate between the Kafka brokers
+themselves. Those requests are internal and should not be used by clients. For exam‐
+ple, when the controller announces that a partition has a new leader, it sends a Leader
+AndIsr request to the new leader (so it will know to start accepting client requests)
+and to the followers (so they will know to follow the new leader).
+The protocol is ever evolving—as the Kafka community adds more client capabilities,
+the protocol evolves to match. For example, in the past, Kafka consumers used
+Apache ZooKeeper to keep track of the offsets they receive from Kafka. So when a
+consumer is started, it can check ZooKeeper for the last offset that was read from its
+partitions and know where to start processing. For various reasons, the community
+decided to stop using ZooKeeper for this and instead stored those offsets in a special
+Kafka topic. To do this, the contributors had to add several requests to the protocol:
+OffsetCommitRequest, OffsetFetchRequest, and ListOffsetsRequest. Now when
+an application calls the client API to commit consumer offsets, the client no longer
+writes to ZooKeeper; instead, it sends OffsetCommitRequest to Kafka.
+Topic creation used to be handled by command-line tools that directly update the list
+of topics in ZooKeeper. The Kafka community since added a CreateTopicRequest,
+and similar requests for managing Kafka’s metadata. Java applications perform these
+metadata operations through Kafka’s AdminClient, documented in depth in Chap‐
+ter 5. Since these operations are now part of the Kafka protocol, it allows clients in
+languages that don’t have a ZooKeeper library to create topics by asking Kafka brok‐
+ers directly.
+In addition to evolving the protocol by adding new request types, Kafka developers
+sometimes choose to modify existing requests to add some capabilities. For example,
+between Kafka 0.9.0 and Kafka 0.10.0, they’ve decided to let clients know who the
+current controller is by adding the information to the Metadata response. As a result,
+a new version was added to the Metadata request and response. Now, 0.9.0 clients
+send Metadata requests of version 0 (because version 1 did not exist in 0.9.0 clients),
+and the brokers, whether they are 0.9.0 or 0.10.0, know to respond with a version 0
+response, which does not have the controller information. This is fine, because 0.9.0
+clients don’t expect the controller information and wouldn’t know how to parse it
+anyway. If you have the 0.10.0 client, it will send a version 1 Metadata request, and
+0.10.0 brokers will respond with a version 1 response that contains the controller
+information, which the 0.10.0 clients can use. If a 0.10.0 client sends a version 1
+Metadata request to a 0.9.0 broker, the broker will not know how to handle the newer
+version of the request and will respond with an error. This is the reason we recom‐
+mend upgrading the brokers before upgrading any of the clients—new brokers know
+how to handle old requests, but not vice versa.
+In release 0.10.0, the Kafka community added ApiVersionRequest, which allows cli‐
+ents to ask the broker which versions of each request are supported and to use the
+148 | Chapter 6: Kafka Internals
+
+=== PAGE 178 ===
+correct version accordingly. Clients that use this new capability correctly will be able
+to talk to older brokers by using a version of the protocol that is supported by the
+broker they are connecting to. There is currently ongoing work to add APIs that will
+allow clients to discover which features are supported by brokers and to allow brokers
+to gate features that exist in a specific version. This improvement was proposed in
+KIP-584, and at this time it seems likely to be part of version 3.0.0.
+Physical Storage
+The basic storage unit of Kafka is a partition replica. Partitions cannot be split
+between multiple brokers, and not even between multiple disks on the same broker.
+So the size of a partition is limited by the space available on a single mount point. (A
+mount point can be a single disk, if JBOD configuration is used, or multiple disks, if
+RAID is configured. See Chapter 2.)
+When configuring Kafka, the administrator defines a list of directories in which the
+partitions will be stored—this is the log.dirs parameter (not to be confused with the
+location in which Kafka stores its error log, which is configured in the log4j.properties
+file). The usual configuration includes a directory for each mount point that Kafka
+will use.
+Let’s look at how Kafka uses the available directories to store data. First, we want to
+look at how data is allocated to the brokers in the cluster and the directories in the
+broker. Then we will look at how the broker manages the files—especially how the
+retention guarantees are handled. We will then dive inside the files and look at the file
+and index formats. Finally, we will look at log compaction, an advanced feature that
+allows you to turn Kafka into a long-term data store, and describe how it works.
+Tiered Storage
+Starting in late 2018, the Apache Kafka community began collaborating on an ambi‐
+tious project to add tiered storage capabilities to Kafka. Work on the project is on-
+going, and it is planned for the 3.0 release.
+The motivation is fairly straightforward: Kafka is currently used to store large
+amounts of data, either due to high throughput or long retention periods. This intro‐
+duces the following concerns:
+• Y ou are limited in how much data you can store in a partition. As a result, maxi‐
+mum retention and partition counts aren’t simply driven by product require‐
+ments but also by the limits on physical disk sizes.
+• Y our choice of disk and cluster size is driven by storage requirements. Clusters
+often end up larger than they would if latency and throughput were the main
+considerations, which drives up costs.
+Physical Storage | 149
+
+=== PAGE 179 ===
+• The time it takes to move partitions from one broker to another, for example,
+when expanding or shrinking the cluster, is driven by the size of the partitions.
+Large partitions make the cluster less elastic. These days, architectures are
+designed toward maximum elasticity, taking advantage of flexible cloud deploy‐
+ment options.
+In the tiered storage approach, the Kafka cluster is configured with two tiers of stor‐
+age: local and remote. The local tier is the same as the current Kafka storage tier—it
+uses the local disks on the Kafka brokers to store the log segments. The new remote
+tier uses dedicated storage systems, such as HDFS or S3, to store the completed log
+segments.
+Kafka users can choose to set a separate storage retention policy for each tier. Since
+local storage is typically far more expensive than the remote tier, the retention period
+for the local tier is usually just a few hours or even shorter, and the retention period
+for the remote tier can be much longer—days, or even months.
+Local storage is significantly lower latency than the remote storage. This works well

@@ -1,0 +1,200 @@
+possible.
+Indexes
+Kafka allows consumers to start fetching messages from any available offset. This
+means that if a consumer asks for 1 MB messages starting at offset 100, the broker
+must be able to quickly locate the message for offset 100 (which can be in any of the
+segments for the partition) and start reading the messages from that offset on. In
+order to help brokers quickly locate the message for a given offset, Kafka maintains
+an index for each partition. The index maps offsets to segment files and positions
+within the file.
+Physical Storage | 155
+
+=== PAGE 185 ===
+Similarly, Kafka has a second index that maps timestamps to message offsets. This 
+index is used when searching for messages by timestamp. Kafka Streams uses this
+lookup extensively, and it is also useful in some failover scenarios.
+Indexes are also broken into segments, so we can delete old index entries when the
+messages are purged. Kafka does not attempt to maintain checksums of the index. If
+the index becomes corrupted, it will get regenerated from the matching log segment
+simply by rereading the messages and recording the offsets and locations. It is also
+completely safe (albeit, it can cause a lengthy recovery) for an administrator to delete
+index segments if needed—they will be regenerated automatically.
+Compaction
+Normally, Kafka will store messages for a set amount of time and purge messages
+older than the retention period. However, imagine a case where you use Kafka to
+store shipping addresses for your customers. In that case, it makes more sense to
+store the last address for each customer rather than data for just the last week or year.
+This way, you don’t have to worry about old addresses, and you still retain the address
+for customers who haven’t moved in a while. Another use case can be an application
+that uses Kafka to store its current state. Every time the state changes, the application
+writes the new state into Kafka. When recovering from a crash, the application reads
+those messages from Kafka to recover its latest state. In this case, it only cares about
+the latest state before the crash, not all the changes that occurred while it was
+running.
+Kafka supports such use cases by allowing the retention policy on a topic to be delete,
+which deletes events older than retention time, or to be compact, which only stores
+the most recent value for each key in the topic. Obviously, setting the policy to com‐
+pact only makes sense on topics for which applications produce events that contain
+both a key and a value. If the topic contains null keys, compaction will fail.
+Topics can also have a delete.and.compact policy that combines compaction with a
+retention period. Messages older than the retention period will be removed even if
+they are the most recent value for a key. This policy prevents compacted topics from
+growing overly large and is also used when the business requires removing records
+after a certain time period.
+How Compaction Works
+Each log is viewed as split into two portions (see Figure 6-6):
+Clean
+Messages that have been compacted before. This section contains only one value
+for each key, which is the latest value at the time of the previous compaction.
+156 | Chapter 6: Kafka Internals
+
+=== PAGE 186 ===
+Dirty
+Messages that were written after the last compaction.
+Figure 6-6. Partition with clean and dirty portions
+If compaction is enabled when Kafka starts (using the awkwardly named
+log.cleaner.enabled configuration), each broker will start a compaction manager
+thread and a number of compaction threads. These are responsible for performing
+the compaction tasks. Each thread chooses the partition with the highest ratio of dirty
+messages to total partition size and cleans this partition.
+To compact a partition, the cleaner thread reads the dirty section of the partition and
+creates an in-memory map. Each map entry is comprised of a 16-byte hash of a mes‐
+sage key and the 8-byte offset of the previous message that had this same key. This
+means each map entry only uses 24 bytes. If we look at a 1 GB segment and assume
+that each message in the segment takes up 1 KB, the segment will contain 1 million
+such messages, and we will only need a 24 MB map to compact the segment (we may
+need a lot less—if the keys repeat themselves, we will reuse the same hash entries
+often and use less memory). This is quite efficient!
+When configuring Kafka, the administrator configures how much memory compac‐
+tion threads can use for this offset map. Even though each thread has its own map,
+the configuration is for total memory across all threads. If you configured 1 GB for
+the compaction offset map and you have 5 cleaner threads, each thread will get 200
+MB for its own offset map. Kafka doesn’t require the entire dirty section of the parti‐
+tion to fit into the size allocated for this map, but at least one full segment has to fit. If
+it doesn’t, Kafka will log an error, and the administrator will need to either allocate
+more memory for the offset maps or use fewer cleaner threads. If only a few segments
+fit, Kafka will start by compacting the oldest segments that fit into the map. The rest
+will remain dirty and wait for the next compaction.
+Once the cleaner thread builds the offset map, it will start reading off the clean seg‐
+ments, starting with the oldest, and check their contents against the offset map. For
+each message, it checks if the key of the message exists in the offset map. If the key
+does not exist in the map, the value of the message just read is still the latest, and the
+message is copied over to a replacement segment. If the key does exist in the map, the
+message is omitted because there is a message with an identical key but newer value
+later in the partition. Once all the messages that still contain the latest value for their
+Physical Storage | 157
+
+=== PAGE 187 ===
+key are copied over, the replacement segment is swapped for the original and the
+thread on to the next segment. At the end of the process, we are left with one message
+per key—the one with the latest value. See Figure 6-7.
+Figure 6-7. Partition segment before and after compaction
+Deleted Events
+If we always keep the latest message for each key, what do we do when we really want
+to delete all messages for a specific key, such as if a user left our service and we are
+legally obligated to remove all traces of that user from our system?
+To delete a key from the system completely, not even saving the last message, the
+application must produce a message that contains that key and a null value. When the
+cleaner thread finds such a message, it will first do a normal compaction and retain
+only the message with the null value. It will keep this special message (known as a
+tombstone) around for a configurable amount of time. During this time, consumers
+will be able to see this message and know that the value is deleted. So if a consumer
+copies data from Kafka to a relational database, it will see the tombstone message and
+know to delete the user from the database. After this set amount of time, the cleaner
+thread will remove the tombstone message, and the key will be gone from the parti‐
+tion in Kafka. It is important to give consumers enough time to see the tombstone
+message, because if our consumer was down for a few hours and missed the
+tombstone message, it will simply not see the key when consuming and therefore not
+know that it was deleted from Kafka or that it needs to be deleted from the database.
+It’s worth remembering that Kafka’s admin client also includes a deleteRecords
+method. This method deletes all records before a specified offset, and it uses a com‐
+pletely different mechanism. When this method is called, Kafka will move the low-
+water mark, its record of the first offset of a partition, to the specified offset. This will
+prevent consumers from consuming the records below the new low-water mark and
+effectively makes these records inaccessible until they get deleted by a cleaner thread.
+This method can be used on topics with a retention policy and on compacted topics.
+158 | Chapter 6: Kafka Internals
+
+=== PAGE 188 ===
+When Are Topics Compacted?
+In the same way that the delete policy never deletes the current active segments, the
+compact policy never compacts the current segment. Messages are eligible for com‐
+paction only on inactive segments.
+By default, Kafka will start compacting when 50% of the topic contains dirty records.
+The goal is not to compact too often (since compaction can impact the read/write
+performance on a topic) but also not to leave too many dirty records around (since
+they consume disk space). Wasting 50% of the disk space used by a topic on dirty
+records and then compacting them in one go seems like a reasonable trade-off, and it
+can be tuned by the administrator.
+In addition, administrators can control the timing of compaction with two configura‐
+tion parameters:
+• min.compaction.lag.ms can be used to guarantee the minimum length of time
+that must pass after a message is written before it could be compacted.
+• max.compaction.lag.ms can be used to guarantee the maximum delay between
+the time a message is written and the time the message becomes eligible for com‐
+paction. This configuration is often used in situations where there is a business
+reason to guarantee compaction within a certain period; for example, GDPR
+requires that certain information will be deleted within 30 days after a request to
+delete has been made.
+Summary
+There is obviously more to Kafka than we could cover in this chapter, but we hope
+this gave you a taste of the kind of design decisions and optimizations the Kafka com‐
+munity made when working on the project and perhaps explained some of the more
+obscure behaviors and configurations you’ve run into while using Kafka.
+If you are really interested in Kafka internals, there is no substitute for reading the
+code. The Kafka developer mailing list (dev@kafka.apache.org) is a very friendly com‐
+munity, and there is always someone willing to answer questions regarding how
+Kafka really works. And while you are reading the code, perhaps you can fix a bug or
+two—open source projects always welcome contributions.
+Summary | 159
+
+=== PAGE 190 ===
+CHAPTER 7
+Reliable Data Delivery
+Reliability is a property of a system—not of a single component—so when we are
+talking about the reliability guarantees of Apache Kafka, we will need to keep the
+entire system and its use cases in mind.  When it comes to reliability, the systems that
+integrate with Kafka are as important as Kafka itself. And because reliability is a sys‐
+tem concern, it cannot be the responsibility of just one person. Everyone—Kafka
+administrators, Linux administrators, network and storage administrators, and the
+application developers—must work together to build a reliable system.
+Apache Kafka is very flexible about reliable data delivery. We understand that Kafka
+has many use cases, from tracking clicks in a website to credit card payments. Some
+of the use cases require utmost reliability, while others prioritize speed and simplicity
+over reliability. Kafka was written to be configurable enough, and its client API flexi‐
+ble enough, to allow all kinds of reliability trade-offs.
+Because of its flexibility, it is also easy to accidentally shoot ourselves in the foot when
+using Kafka—believing that our system is reliable when in fact it is not. In this chap‐
+ter, we will start by talking about different kinds of reliability and what they mean in
+the context of Apache Kafka. Then we will talk about Kafka’s replication mechanism
+and how it contributes to the reliability of the system. We will then discuss Kafka’s
+brokers and topics and how they should be configured for different use cases. Then
+we will discuss the clients, producer, and consumer, and how they should be used in
+different reliability scenarios. Last, we will discuss the topic of validating the system
+reliability, because it is not enough to believe a system is reliable—the assumption
+must be thoroughly tested.
+161
+
+=== PAGE 191 ===
+Reliability Guarantees
+When we talk about reliability, we usually talk in terms of guarantees, which are the
+behaviors a system is guaranteed to preserve under different circumstances.
+Probably the best-known reliability guarantee is ACID, which is the standard reliabil‐
+ity guarantee that relational databases universally support. ACID stands for atomicity,
+consistency, isolation, and durability. When a vendor explains that their database is
+ACID compliant, it means the database guarantees certain behaviors regarding trans‐
+action behavior.
+Those guarantees are the reason people trust relational databases with their most crit‐
+ical applications—they know exactly what the system promises and how it will behave
+in different conditions. They understand the guarantees and can write safe applica‐
+tions by relying on those guarantees.
+Understanding the guarantees Kafka provides is critical for those seeking to build
+reliable applications. This understanding allows the developers of the system to figure
+out how it will behave under different failure conditions. So, what does Apache Kafka
+guarantee?
+• Kafka provides order guarantee of messages in a partition. If message B was writ‐
+ten after message A, using the same producer in the same partition, then Kafka
+guarantees that the offset of message B will be higher than message A, and that
+consumers will read message B after message A.
+• Produced messages are considered “committed” when they were written to the
+partition on all its in-sync replicas (but not necessarily flushed to disk). Produc‐

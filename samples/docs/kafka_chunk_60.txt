@@ -1,0 +1,200 @@
+names that begin with the double underscore naming convention
+to prevent confusion.
+Creating a new topic is simple. Run kafka-topics.sh as follows:
+# kafka-topics.sh --bootstrap-server <connection-string>:<port> --create --
+topic <string>
+--replication-factor <integer> --partitions <integer>
+#
+The command will cause the cluster to create a topic with the specified name and
+number of partitions. For each partition, the cluster will select the specified number
+of replicas appropriately. This means that if the cluster is set up for rack-aware replica
+assignment, the replicas for each partition will be in separate racks. If rack-aware
+assignment is not desired, specify the --disable-rack-aware command-line
+argument.
+For example, create a topic named “my-topic” with eight partitions that have two rep‐
+licas each:
+# kafka-topics.sh --bootstrap-server localhost:9092 --create
+--topic my-topic --replication-factor 2 --partitions 8
+Created topic "my-topic".
+#
+Using if-exists and if-not-exists Arguments Properly
+When using kafka-topics.sh in automation, you may want to use
+the --if-not-exists argument while creating new topics that will
+not return an error if the topic already exists.
+While an --if-exists argument is provided for the --alter com‐
+mand, using it is not recommended. Using this argument will cause
+the command to not return an error if the topic being changed
+does not exist. This can mask problems where a topic does not
+exist that should have been created.
+Topic Operations | 307
+
+=== PAGE 337 ===
+Listing All Topics in a Cluster
+The --list command lists all topics in a cluster. The list is formatted with one topic
+per line, in no particular order, which is useful for generating a full list of topics.
+Here’s an example of the --list option listing all topics in the cluster:
+# kafka-topics.sh --bootstrap-server localhost:9092 --list
+__consumer_offsets
+my-topic
+other-topic
+Y ou’ll notice the internal __consumer_offsets topic is listed here. Running the com‐
+mand with --exclude-internal will remove all topics from the list that begin with
+the double underscore mentioned earlier, which can be beneficial.
+Describing Topic Details
+It is also possible to get detailed information on one or more topics in the cluster. The
+output includes the partition count, topic configuration overrides, and a listing of
+each partition with its replica assignments. This can be limited to a single topic by
+providing a --topic argument to the command.
+For example, describing our recently created “my-topic” in the cluster:
+# kafka-topics.sh --boostrap-server localhost:9092 --describe --topic my-topic
+Topic: my-topic PartitionCount: 8 ReplicationFactor: 2 Configs: seg
+ment.bytes=1073741824
+ Topic: my-topic Partition: 0 Leader: 1 Replicas: 1,0 Isr: 1,0
+ Topic: my-topic Partition: 1 Leader: 0 Replicas: 0,1 Isr: 0,1
+ Topic: my-topic Partition: 2 Leader: 1 Replicas: 1,0 Isr: 1,0
+ Topic: my-topic Partition: 3 Leader: 0 Replicas: 0,1 Isr: 0,1
+ Topic: my-topic Partition: 4 Leader: 1 Replicas: 1,0 Isr: 1,0
+ Topic: my-topic Partition: 5 Leader: 0 Replicas: 0,1 Isr: 0,1
+ Topic: my-topic Partition: 6 Leader: 1 Replicas: 1,0 Isr: 1,0
+ Topic: my-topic Partition: 7 Leader: 0 Replicas: 0,1 Isr: 0,1
+#
+The --describe command also has several useful options for filtering the output.
+These can be helpful for diagnosing cluster issues more easily. For these commands
+we generally do not specify the --topic argument because the intention is to find all
+topics or partitions in a cluster that match the criteria. These options will not work
+with the list command. Here is a list of useful pairings to use:
+--topics-with-overrides
+This will describe only the topics that have configurations that differ from the
+cluster defaults.
+308 | Chapter 12: Administering Kafka
+
+=== PAGE 338 ===
+--exclude-internal
+The previously mentioned command will remove all topics from the list that
+begin with the double underscore naming convention.
+The following commands are used to help find topic partitions that may have
+problems:
+--under-replicated-partitions
+This shows all partitions where one or more of the replicas are not in sync with
+the leader. This isn’t necessarily bad, as cluster maintenance, deployments, and
+rebalances will cause under-replicated partitions (or URPs) but is something to
+be aware of.
+--at-min-isr-partitions
+This shows all partitions where the number of replicas, including the leader,
+exactly match the setting for minimum in-sync replicas (ISRs). These topics are
+still available for producer or consumer clients, but all redundancy has been lost,
+and they are in danger of becoming unavailable.
+--under-min-isr-partitions
+This shows all partitions where the number of ISRs is below the configured mini‐
+mum for successful produce actions. These partitions are effectively in read-only
+mode and cannot be produced to.
+--unavailable-partitions
+This shows all topic partitions without a leader. This is a serious situation and
+indicates that the partition is offline and unavailable for producer or consumer
+clients.
+Here’s an example of finding topics that are at the minimum ISR setttings. In this
+example, the topic is configured for a min-ISR of 1 and has a replication factor (RF)
+of 2. Host 0 is online, and host 1 has gone down for maintenance:
+# kafka-topics.sh --bootstrap-server localhost:9092 --describe --at-min-isr-
+partitions
+        Topic: my-topic Partition: 0    Leader: 0       Replicas: 0,1   Isr: 0
+        Topic: my-topic Partition: 1    Leader: 0       Replicas: 0,1   Isr: 0
+        Topic: my-topic Partition: 2    Leader: 0       Replicas: 0,1   Isr: 0
+        Topic: my-topic Partition: 3    Leader: 0       Replicas: 0,1   Isr: 0
+        Topic: my-topic Partition: 4    Leader: 0       Replicas: 0,1   Isr: 0
+        Topic: my-topic Partition: 5    Leader: 0       Replicas: 0,1   Isr: 0
+        Topic: my-topic Partition: 6    Leader: 0       Replicas: 0,1   Isr: 0
+        Topic: my-topic Partition: 7    Leader: 0       Replicas: 0,1   Isr: 0
+#
+Topic Operations | 309
+
+=== PAGE 339 ===
+Adding Partitions
+It is sometimes necessary to increase the number of partitions for a topic. Partitions
+are the way topics are scaled and replicated across a cluster. The most common rea‐
+son to increase the partition count is to horizontally scale a topic across more brokers
+by decreasing the throughput for a single partition. Topics may also be increased if a
+consumer needs to expand to run more copies in a single consumer group since a
+partition can only be consumed by a single member in the group.
+Following is an example of increasing the number of partitions for a topic named
+“my-topic” to 16 using the --alter command, followed by a verification that it
+worked:
+# kafka-topics.sh --bootstrap-server localhost:9092
+--alter --topic my-topic --partitions 16
+# kafka-topics.sh --bootstrap-server localhost:9092 --describe --topic my-topic
+Topic: my-topic PartitionCount: 16 ReplicationFactor: 2 Configs: seg
+ment.bytes=1073741824
+ Topic: my-topic Partition: 0 Leader: 1 Replicas: 1,0 Isr: 1,0
+ Topic: my-topic Partition: 1 Leader: 0 Replicas: 0,1 Isr: 0,1
+ Topic: my-topic Partition: 2 Leader: 1 Replicas: 1,0 Isr: 1,0
+ Topic: my-topic Partition: 3 Leader: 0 Replicas: 0,1 Isr: 0,1
+ Topic: my-topic Partition: 4 Leader: 1 Replicas: 1,0 Isr: 1,0
+ Topic: my-topic Partition: 5 Leader: 0 Replicas: 0,1 Isr: 0,1
+ Topic: my-topic Partition: 6 Leader: 1 Replicas: 1,0 Isr: 1,0
+ Topic: my-topic Partition: 7 Leader: 0 Replicas: 0,1 Isr: 0,1
+ Topic: my-topic Partition: 8 Leader: 1 Replicas: 1,0 Isr: 1,0
+ Topic: my-topic Partition: 9 Leader: 0 Replicas: 0,1 Isr: 0,1
+ Topic: my-topic Partition: 10 Leader: 1 Replicas: 1,0 Isr: 1,0
+ Topic: my-topic Partition: 11 Leader: 0 Replicas: 0,1 Isr: 0,1
+ Topic: my-topic Partition: 12 Leader: 1 Replicas: 1,0 Isr: 1,0
+ Topic: my-topic Partition: 13 Leader: 0 Replicas: 0,1 Isr: 0,1
+ Topic: my-topic Partition: 14 Leader: 1 Replicas: 1,0 Isr: 1,0
+ Topic: my-topic Partition: 15 Leader: 0 Replicas: 0,1 Isr: 0,1
+#
+Adjusting Keyed Topics
+Topics that are produced with keyed messages can be very difficult
+to add partitions to from a consumer’s point of view. This is
+because the mapping of keys to partitions will change when the
+number of partitions is changed. For this reason, it is advisable to
+set the number of partitions for a topic that will contain keyed mes‐
+sages once, when the topic is created, and avoid resizing the topic.
+310 | Chapter 12: Administering Kafka
+
+=== PAGE 340 ===
+Reducing Partitions
+It is not possible to reduce the number of partitions for a topic. Deleting a partition
+from a topic would cause part of the data in that topic to be deleted as well, which
+would be inconsistent from a client point of view. In addition, trying to redistribute
+the data to the remaining partitions would be difficult and result in out-of-order mes‐
+sages. Should you need to reduce the number of partitions, it is recommended to
+delete the topic and re-create it or (if deletion is not possible) create a new version of
+the existing topic and move all produce traffic to the new topic (e.g., “my-topic-v2”).
+Deleting a Topic
+Even a topic with no messages uses cluster resources such as disk space, open filehan‐
+dles, and memory. The controller also has junk metadata that it must retain knowl‐
+edge of, which can hinder performance at large scale. If a topic is no longer needed, it
+can be deleted to free up these resources. To perform this action, the brokers in the
+cluster must be configured with the delete.topic.enable option set to true. If it’s
+set to false, then the request to delete the topic will be ignored and will not succeed.
+Topic deletion is an asynchronous operation. This means that running this command
+will mark a topic for deletion, but the deletion may not happen immediately, depend‐
+ing on the amount of data and cleanup needed. The controller will notify the brokers
+of the pending deletion as soon as possible (after existing controller tasks complete),
+and the brokers will then invalidate the metadata for the topic and delete the files
+from disk. It is highly recommended that operators not delete more than one or two
+topics at a time, and give those ample time to complete before deleting other topics,
+due to limitations in the way the controller executes these operations. In the small
+cluster shown in the examples in this book, topic deletion will happen almost imme‐
+diately, but in larger clusters it may take longer.
+Data Loss Ahead
+Deleting a topic will also delete all its messages. This is not a
+reversible operation. Make sure it is executed carefully.
+Here is an example of deleting the topic named “my-topic” using the --delete argu‐
+ment. Depending on the version of Kafka, there will be a note letting you know that
+the argument will not work if another config is not set:
+# kafka-topics.sh --bootstrap-server localhost:9092
+--delete --topic my-topic
+Note: This will have no impact if delete.topic.enable is not set
+to true.
+#
+Topic Operations | 311
+
+=== PAGE 341 ===
+Y ou will notice there is no visible feedback that the topic deletion was completed suc‐
+cessfully or not. Verify that deletion was successful by running the --list or
+--describe options to see that the topic is no longer in the cluster.
+Consumer Groups
+Consumer groups are coordinated groups of Kafka consumers consuming from top‐
+ics or multiple partitions of a single topic. The kafka-consumer-groups.sh tool helps
+manage and gain insight into the consumer groups that are consuming from topics in
+the cluster. It can be used to list consumer groups, describe specific groups, delete

@@ -1,0 +1,200 @@
+Password Protection
+Customizable configuration providers can be configured for Kafka brokers and cli‐
+ents to retrieve passwords from a secure third-party password store. Passwords may
+Securing the Platform | 301
+
+=== PAGE 331 ===
+also be stored in encrypted form in configuration files with custom configuration
+providers that perform decryption.
+The custom configuration provider that follows uses the tool gpg to decrypt broker or
+client properties stored in a file:
+public class GpgProvider implements ConfigProvider {
+  @Override
+  public void configure(Map<String, ?> configs) {}
+  @Override
+  public ConfigData get(String path) {
+    try {
+      String passphrase = System.getenv("PASSPHRASE");  
+      String data = Shell.execCommand(                  
+        "gpg", "--decrypt", "--passphrase", passphrase, path);
+      Properties props = new Properties();
+      props.load(new StringReader(data));               
+      Map<String, String> map = new HashMap<>();
+      for (String name : props.stringPropertyNames())
+        map.put(name, props.getProperty(name));
+      return new ConfigData(map);
+    } catch (IOException e) {
+      throw new RuntimeException(e);                    
+    }
+  }
+  @Override
+  public ConfigData get(String path, Set<String> keys) { 
+    ConfigData configData = get(path);
+    Map<String, String> data = configData.data().entrySet()
+      .stream().filter(e -> keys.contains(e.getKey()))
+      .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+    return new ConfigData(data, configData.ttl());
+  }
+  @Override
+  public void close() {}
+}
+We provide the passphrase for decoding passwords to the process in the environ‐
+ment variable PASSPHRASE.
+We decrypt the configs using gpg. The return value contains the full set of
+decrypted configs.
+We parse the configs in data as Java properties.
+We fail fast with a RuntimeException if an error is encountered.
+302 | Chapter 11: Securing Kafka
+
+=== PAGE 332 ===
+Caller may request a subset of keys from the path; here we get all values and
+return the requested subset.
+Y ou may recall that in the section on SASL/PLAIN, we used standard Kafka configu‐
+ration classes to load credentials from an external file. We can now encrypt that file
+using gpg:
+gpg --symmetric --output credentials.props.gpg \
+  --passphrase "$PASSPHRASE" credentials.props
+We now add indirect configs and config provider options to the original properties
+file so that Kafka clients load their credentials from the encrypted file:
+username=${gpg:/path/to/credentials.props.gpg:username}
+password=${gpg:/path/to/credentials.props.gpg:password}
+config.providers=gpg
+config.providers.gpg.class=com.example.GpgProvider
+Sensitive broker configuration options can also be stored encrypted in ZooKeeper
+using the Kafka configs tool without using custom providers. The following com‐
+mand can be executed before starting brokers to store encrypted SSL key store pass‐
+words for brokers in ZooKeeper. The password encoder secret must be configured in
+each broker’s configuration file to decrypt the value:
+$ bin/kafka-configs.sh --zookeeper localhost:2181 --alter \
+  --entity-type brokers --entity-name 0 --add-config      \
+  'listener.name.external.ssl.keystore.password=server-ks-
+password,password.encoder.secret=encoder-secret'
+Summary
+The frequency and scale of data breaches have been increasing over the last decade as
+cyberattacks have become increasingly sophisticated. In addition to the significant
+cost of isolating and resolving breaches and the cost of outages until security fixes
+have been applied, data breaches may also result in regulatory penalties and long-
+term damage to brand reputation. In this chapter, we explored the vast array of
+options available to guarantee the confidentiality, integrity, and availability of data
+stored in Kafka.
+Going back to the example data flow at the start of this chapter, we reviewed the
+options available for different aspects of security throughout the flow:
+Client authenticity
+When Alice’s client establishes connection to a Kafka broker, a listener using
+SASL or SSL with client authentication can verify that the connection is really
+from Alice and not an imposter. Reauthentication can configured to limit expo‐
+sure in case a user is compromised.
+Summary | 303
+
+=== PAGE 333 ===
+Server authenticity
+Alice’s client can verify that its connection is to the genuine broker using SSL
+with hostname validation or using SASL mechanisms with mutual authentica‐
+tion, like Kerberos or SCRAM.
+Data privacy
+Use of SSL to encrypt data in transit protects data from eavesdroppers. Disk or
+volume encryption protects data at rest even if the disk is stolen. For highly sensi‐
+tive data, end-to-end encryption provides fine-grained data access control and
+ensures that cloud providers and platform administrators with physical access to
+network and disks cannot access the data.
+Data integrity
+SSL can be used to detect tampering of data over an insecure network. Digital
+signatures can be included in messages to verify integrity when using end-to-end
+encryption.
+Access control
+Every operation performed by Alice, Bob, and even brokers is authorized using a
+customizable authorizer. Kafka has a built-in authorizer that enables fine-grained
+access control using ACLs.
+Auditability
+Authorizer logs and request logs can be used to track operations and attempted
+operations for auditing and anomaly detection.
+Availability
+A combination of quotas and configuration options to manage connections can
+be used to protect brokers from denial-of-service attacks. ZooKeeper can be
+secured using SSL, SASL, and ACLs to ensure that the metadata needed to ensure
+the availability of Kafka brokers is secure.
+With the wide choice of options available for security, choosing the appropriate
+options for each use case can be a daunting task. We reviewed the security concerns
+to consider for each security mechanism, and the controls and policies that can be
+adopted to limit the potential attack surface. We also reviewed the additional meas‐
+ures required to lock down ZooKeeper and the rest of the platform. The standard
+security technologies supported by Kafka and the various extension points to
+integrate with the existing security infrastructure in your organization enable you to
+build consistent security solutions to protect the whole platform.
+304 | Chapter 11: Securing Kafka
+
+=== PAGE 334 ===
+CHAPTER 12
+Administering Kafka
+Managing a Kafka cluster requires additional tooling to perform administrative
+changes to topics, configurations, and more. Kafka provides several command-line
+interface (CLI) utilities that are useful for making administrative changes to your
+clusters. The tools are implemented in Java classes, and a set of scripts are provided
+natively to call those classes properly. While these tools provide basic functions, you
+may find they are lacking for more complex operations or are unwieldy to use at
+larger scales. This chapter will describe only the basic tools that are available as part
+of the Apache Kafka open source project. More information about advanced tools
+that have been developed in the community, outside of the core project, can be found
+on the Apache Kafka website.
+Authorizing Admin Operations
+While Apache Kafka implements authentication and authorization
+to control topic operations, default configurations do not restrict
+the use of these tools. This means that these CLI tools can be used
+without any authentication required, which will allow operations
+such as topic changes to be executed with no security check or
+audit. Always ensure that access to this tooling on your deploy‐
+ments is restricted to administrators only to prevent unauthorized
+changes.
+Topic Operations
+The kafka-topics.sh tool provides easy access to most topic operations. It allows
+you to create, modify, delete, and list information about topics in the cluster.
+While some topic configurations are possible through this command, they have been
+deprecated, and it is recommended to use the more robust method of using the
+305
+
+=== PAGE 335 ===
+kafka-config.sh tool for configuration changes. To use the kafka-topics.sh com‐
+mand, you must provide the cluster connection string and port through the
+--bootstrap-server option. In the examples that follow, the cluster connect string is
+being run locally on one of the hosts in the Kafka cluster, and we will be using local
+host:9092.
+Throughout this chapter, all the tools will be located in the directory /usr/local/kafka/
+bin/. The example commands in this section will assume you are in this directory or
+have added the directory to your $PATH.
+Check the Version
+Many of the command-line tools for Kafka have a dependency on
+the version of Kafka running to operate correctly. This includes
+some commands that may store data in ZooKeeper rather than
+connecting to the brokers themselves. For this reason, it is impor‐
+tant to make sure the version of the tools that you are using
+matches the version of the brokers in the cluster. The safest
+approach is to run the tools on the Kafka brokers themselves, using
+the deployed version.
+Creating a New Topic
+When creating a new topic through the --create command, there are several
+required arguments to create a new topic in a cluster. These arguments must be pro‐
+vided when using this command even though some of them may have broker-level
+defaults configured already. Additional arguments and configuration overrides are
+possible at this time, as well using the --config option, but are covered later in the
+chapter. Here is a list of the three required arguments:
+--topic
+The name of the topic that you wish to create.
+--replication-factor
+The number of replicas of the topic to maintain within the cluster.
+--partitions
+The number of partitions to create for the topic.
+306 | Chapter 12: Administering Kafka
+
+=== PAGE 336 ===
+Good Topic Naming Practices
+Topic names may contain alphanumeric characters, underscores,
+dashes, and periods; however, it is not recommended to use periods
+in topic names. Internal metrics inside of Kafka convert period
+characters to underscore characters (e.g., “topic.1” becomes
+“topic_1” in metrics calculations), which can result in conflicts in
+topic names.
+Another recommendation is to avoid using a double underscore to
+start your topic name. By convention, topics internal to Kafka
+operations are created with a double underscore naming conven‐
+tion (like the __consumer_offsets topic, which tracks consumer
+group offset storage). As such it is not recommended to have topic

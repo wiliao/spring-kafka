@@ -1,0 +1,200 @@
+Configuring Consumers | 91
+
+=== PAGE 121 ===
+the number of consumers does not divide the number of partitions in each topic
+neatly.
+RoundRobin
+Takes all the partitions from all subscribed topics and assigns them to consumers
+sequentially, one by one. If C1 and C2 described previously used RoundRobin
+assignment, C1 would have partitions 0 and 2 from topic T1, and partition 1
+from topic T2. C2 would have partition 1 from topic T1, and partitions 0 and 2
+from topic T2. In general, if all consumers are subscribed to the same topics (a
+very common scenario), RoundRobin assignment will end up with all consumers
+having the same number of partitions (or at most one partition difference).
+Sticky
+The Sticky Assignor has two goals: the first is to have an assignment that is as
+balanced as possible, and the second is that in case of a rebalance, it will leave as
+many assignments as possible in place, minimizing the overhead associated with
+moving partition assignments from one consumer to another. In the common
+case where all consumers are subscribed to the same topic, the initial assignment
+from the Sticky Assignor will be as balanced as that of the RoundRobin Assignor.
+Subsequent assignments will be just as balanced but will reduce the number of
+partition movements. In cases where consumers in the same group subscribe to
+different topics, the assignment achieved by Sticky Assignor is more balanced
+than that of the RoundRobin Assignor.
+Cooperative Sticky
+This assignment strategy is identical to that of the Sticky Assignor but supports
+cooperative rebalances in which consumers can continue consuming from the
+partitions that are not reassigned. See “Consumer Groups and Partition Reba‐
+lance” on page 80 to read more about cooperative rebalancing, and note that if
+you are upgrading from a version older than 2.3, you’ll need to follow a specific
+upgrade path in order to enable the cooperative sticky assignment strategy, so pay
+extra attention to the upgrade guide.
+The partition.assignment.strategy allows you to choose a partition assignment
+strategy. The default is org.apache.kafka.clients.consumer.RangeAssignor,
+which implements the Range strategy described earlier. Y ou can replace it with
+org.apache.kafka.clients.consumer.RoundRobinAssignor, org.apache.kafka.
+clients.consumer.StickyAssignor, or org.apache.kafka.clients.consumer.
+CooperativeStickyAssignor. A more advanced option is to implement your own
+assignment strategy, in which case partition.assignment.strategy should point to
+the name of your class.
+92 | Chapter 4: Kafka Consumers: Reading Data from Kafka
+
+=== PAGE 122 ===
+client.id
+This can be any string, and will be used by the brokers to identify requests sent from
+the client, such as fetch requests. It is used in logging and metrics, and for quotas.
+client.rack
+By default, consumers will fetch messages from the leader replica of each partition.
+However, when the cluster spans multiple datacenters or multiple cloud availability
+zones, there are advantages both in performance and in cost to fetching messages
+from a replica that is located in the same zone as the consumer. To enable fetching
+from the closest replica, you need to set the client.rack configuration and identify
+the zone in which the client is located.  Then you can configure the brokers to replace
+the default replica.selector.class with org.apache.kafka.common.replica.Rack
+AwareReplicaSelector.
+Y ou can also implement your own replica.selector.class with custom logic for
+choosing the best replica to consume from, based on client metadata and partition
+metadata.
+group.instance.id
+This can be any unique string and is used to provide a consumer with static group
+membership.
+receive.buffer.bytes and send.buffer.bytes
+These are the sizes of the TCP send and receive buffers used by the sockets when
+writing and reading data. If these are set to –1, the OS defaults will be used. It can be a
+good idea to increase these when producers or consumers communicate with brokers
+in a different datacenter, because those network links typically have higher latency
+and lower bandwidth.
+offsets.retention.minutes
+This is a broker configuration, but it is important to be aware of it due to its impact
+on consumer behavior. As long as a consumer group has active members (i.e., mem‐
+bers that are actively maintaining membership in the group by sending heartbeats),
+the last offset committed by the group for each partition will be retained by Kafka, so
+it can be retrieved in case of reassignment or restart. However, once a group becomes
+empty, Kafka will only retain its committed offsets to the duration set by this configu‐
+ration—7 days by default. Once the offsets are deleted, if the group becomes active
+again it will behave like a brand-new consumer group with no memory of anything it
+consumed in the past. Note that this behavior changed a few times, so if you use
+Configuring Consumers | 93
+
+=== PAGE 123 ===
+versions older than 2.1.0, check the documentation for your version for the expected
+behavior.
+Commits and Offsets
+Whenever we call poll(), it returns records written to Kafka that consumers in our
+group have not read yet. This means that we have a way of tracking which records
+were read by a consumer of the group. As discussed before, one of Kafka’s unique
+characteristics is that it does not track acknowledgments from consumers the way
+many JMS queues do. Instead, it allows consumers to use Kafka to track their posi‐
+tion (offset) in each partition.
+We call the action of updating the current position in the partition an offset commit.
+Unlike traditional message queues, Kafka does not commit records individually.
+Instead, consumers commit the last message they’ve successfully processed from a
+partition and implicitly assume that every message before the last was also success‐
+fully processed.
+How does a consumer commit an offset? It sends a message to Kafka, which updates a
+special __consumer_offsets topic with the committed offset for each partition. As
+long as all your consumers are up, running, and churning away, this will have no
+impact. However, if a consumer crashes or a new consumer joins the consumer
+group, this will trigger a rebalance. After a rebalance, each consumer may be assigned
+a new set of partitions than the one it processed before. In order to know where to
+pick up the work, the consumer will read the latest committed offset of each partition
+and continue from there.
+If the committed offset is smaller than the offset of the last message the client pro‐
+cessed, the messages between the last processed offset and the committed offset will
+be processed twice. See Figure 4-8.
+Figure 4-8. Reprocessed messages
+94 | Chapter 4: Kafka Consumers: Reading Data from Kafka
+
+=== PAGE 124 ===
+If the committed offset is larger than the offset of the last message the client actually
+processed, all messages between the last processed offset and the committed offset
+will be missed by the consumer group. See Figure 4-9.
+Figure 4-9. Missed messages between offsets
+Clearly, managing offsets has a big impact on the client application. The
+KafkaConsumer API provides multiple ways of committing offsets.
+Which Offset Is Committed?
+When committing offsets either automatically or without specify‐
+ing the intended offsets, the default behavior is to commit the offset
+after the last offset that was returned by poll(). This is important
+to keep in mind when attempting to manually commit specific off‐
+sets or seek to commit specific offsets. However, it is also tedious to
+repeatedly read “Commit the offset that is one larger than the last
+offset the client received from poll(), ” and 99% of the time it does
+not matter. So, we are going to write “Commit the last offset” when
+we refer to the default behavior, and if you need to manually
+manipulate offsets, please keep this note in mind.
+Automatic Commit
+The easiest way to commit offsets is to allow the consumer to do it for you. If you
+configure enable.auto.commit=true, then every five seconds the consumer will
+commit the latest offset that your client received from poll(). The five-second inter‐
+val is the default and is controlled by setting auto.commit.interval.ms. Just like
+everything else in the consumer, the automatic commits are driven by the poll loop.
+Whenever you poll, the consumer checks if it is time to commit, and if it is, it will
+commit the offsets it returned in the last poll.
+Commits and Offsets | 95
+
+=== PAGE 125 ===
+Before using this convenient option, however, it is important to understand the
+consequences.
+Consider that, by default, automatic commits occur every five seconds. Suppose that
+we are three seconds after the most recent commit our consumer crashed. After the
+rebalancing, the surviving consumers will start consuming the partitions that were
+previously owned by the crashed broker. But they will start from the last offset com‐
+mitted. In this case, the offset is three seconds old, so all the events that arrived in
+those three seconds will be processed twice. It is possible to configure the commit
+interval to commit more frequently and reduce the window in which records will be
+duplicated, but it is impossible to completely eliminate them.
+With autocommit enabled, when it is time to commit offsets, the next poll will com‐
+mit the last offset returned by the previous poll. It doesn’t know which events were
+actually processed, so it is critical to always process all the events returned by poll()
+before calling poll() again. (Just like poll(), close() also commits offsets automati‐
+cally.) This is usually not an issue, but pay attention when you handle exceptions or
+exit the poll loop prematurely.
+Automatic commits are convenient, but they don’t give developers enough control to
+avoid duplicate messages.
+Commit Current Offset
+Most developers exercise more control over the time at which offsets are
+committed—both to eliminate the possibility of missing messages and to reduce the
+number of messages duplicated during rebalancing. The Consumer API has the
+option of committing the current offset at a point that makes sense to the application
+developer rather than based on a timer.
+By setting enable.auto.commit=false, offsets will only be committed when the
+application explicitly chooses to do so. The simplest and most reliable of the commit
+APIs is commitSync(). This API will commit the latest offset returned by poll() and
+return once the offset is committed, throwing an exception if the commit fails for
+some reason.
+It is important to remember that commitSync() will commit the latest offset returned
+by poll(), so if you call commitSync() before you are done processing all the records
+in the collection, you risk missing the messages that were committed but not pro‐
+cessed, in case the application crashes. If the application crashes while it is still pro‐
+cessing records in the collection, all the messages from the beginning of the most
+recent batch until the time of the rebalance will be processed twice—this may or may
+not be preferable to missing messages.
+96 | Chapter 4: Kafka Consumers: Reading Data from Kafka
+
+=== PAGE 126 ===
+Here is how we would use commitSync to commit offsets after we finished processing
+the latest batch of messages:
+Duration timeout = Duration.ofMillis(100);
+while (true) {
+    ConsumerRecords<String, String> records = consumer.poll(timeout);
+    for (ConsumerRecord<String, String> record : records) {
+        System.out.printf("topic = %s, partition = %d, offset =
+            %d, customer = %s, country = %s\n",
+            record.topic(), record.partition(),
+            record.offset(), record.key(), record.value()); 
+    }
+    try {
+        consumer.commitSync(); 
+    } catch (CommitFailedException e) {
+        log.error("commit failed", e) 
+    }
+}
+Let’s assume that by printing the contents of a record, we are done processing it.
+Y our application will likely do a lot more with the records—modify them, enrich
+them, aggregate them, display them on a dashboard, or notify users of important
+events. Y ou should determine when you are “done” with a record according to
+your use case.
+Once we are done “processing” all the records in the current batch, we call
+commitSync to commit the last offset in the batch, before polling for additional

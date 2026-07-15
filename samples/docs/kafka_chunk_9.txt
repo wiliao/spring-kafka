@@ -1,0 +1,200 @@
+cussing partition moves.
+log.retention.bytes
+Another way to expire messages is based on the total number of bytes of messages
+retained. This value is set using the log.retention.bytes parameter, and it is
+applied per partition. This means that if you have a topic with 8 partitions, and
+log.retention.bytes is set to 1 GB, the amount of data retained for the topic will be
+8 GB at most. Note that all retention is performed for individual partitions, not the
+topic. This means that should the number of partitions for a topic be expanded, the
+retention will also increase if log.retention.bytes is used. Setting the value to –1
+will allow for infinite retention.
+30 | Chapter 2: Installing Kafka
+
+=== PAGE 60 ===
+Configuring Retention by Size and Time
+If you have specified a value for both log.retention.bytes and
+log.retention.ms (or another parameter for retention by time),
+messages may be removed when either criteria is met. For example,
+if log.retention.ms is set to 86400000 (1 day) and log.
+retention.bytes is set to 1000000000 (1 GB), it is possible for
+messages that are less than 1 day old to get deleted if the total vol‐
+ume of messages over the course of the day is greater than 1 GB.
+Conversely, if the volume is less than 1 GB, messages can be deleted
+after 1 day even if the total size of the partition is less than 1 GB. It
+is recommended, for simplicity, to choose either size- or time-
+based retention—and not both—to prevent surprises and unwan‐
+ted data loss, but both can be used for more advanced
+configurations.
+log.segment.bytes
+The log retention settings previously mentioned operate on log segments, not indi‐
+vidual messages. As messages are produced to the Kafka broker, they are appended to
+the current log segment for the partition. Once the log segment has reached the size
+specified by the log.segment.bytes parameter, which defaults to 1 GB, the log seg‐
+ment is closed and a new one is opened. Once a log segment has been closed, it can be
+considered for expiration. A smaller log segment size means that files must be closed
+and allocated more often, which reduces the overall efficiency of disk writes.
+Adjusting the size of the log segments can be important if topics have a low produce
+rate. For example, if a topic receives only 100 megabytes per day of messages, and
+log.segment.bytes is set to the default, it will take 10 days to fill one segment. As
+messages cannot be expired until the log segment is closed, if log.retention.ms is
+set to 604800000 (1 week), there will actually be up to 17 days of messages retained
+until the closed log segment expires. This is because once the log segment is closed
+with the current 10 days of messages, that log segment must be retained for 7 days
+before it expires based on the time policy (as the segment cannot be removed until
+the last message in the segment can be expired).
+Retrieving Offsets by Timestamp
+The size of the log segment also affects the behavior of fetching off‐
+sets by timestamp. When requesting offsets for a partition at a spe‐
+cific timestamp, Kafka finds the log segment file that was being
+written at that time. It does this by using the creation and last
+modified time of the file, and looking for a file that was created
+before the timestamp specified and last modified after the time‐
+stamp. The offset at the beginning of that log segment (which is
+also the filename) is returned in the response.
+Configuring the Broker | 31
+
+=== PAGE 61 ===
+log.roll.ms
+Another way to control when log segments are closed is by using the log.roll.ms
+parameter, which specifies the amount of time after which a log segment should be
+closed. As with the log.retention.bytes and log.retention.ms parameters,
+log.segment.bytes and log.roll.ms are not mutually exclusive properties. Kafka
+will close a log segment either when the size limit is reached or when the time limit is
+reached, whichever comes first. By default, there is no setting for log.roll.ms, which
+results in only closing log segments by size.
+Disk Performance When Using Time-Based Segments
+When using a time-based log segment limit, it is important to con‐
+sider the impact on disk performance when multiple log segments
+are closed simultaneously. This can happen when there are many
+partitions that never reach the size limit for log segments, as the
+clock for the time limit will start when the broker starts and will
+always execute at the same time for these low-volume partitions.
+min.insync.replicas
+When configuring your cluster for data durability, setting min.insync.replicas to 2
+ensures that at least two replicas are caught up and “in sync” with the producer. This
+is used in tandem with setting the producer config to ack “all” requests. This will
+ensure that at least two replicas (leader and one other) acknowledge a write for it to
+be successful. This can prevent data loss in scenarios where the leader acks a write,
+then suffers a failure and leadership is transferred to a replica that does not have a
+successful write. Without these durable settings, the producer would think it success‐
+fully produced, and the message(s) would be dropped on the floor and lost. However,
+configuring for higher durability has the side effect of being less efficient due to the
+extra overhead involved, so clusters with high-throughput that can tolerate occasional
+message loss aren’t recommended to change this setting from the default of 1. See
+Chapter 7 for more information.
+message.max.bytes
+The Kafka broker limits the maximum size of a message that can be produced, con‐
+figured by the message.max.bytes parameter, which defaults to 1000000, or 1 MB.  A
+producer that tries to send a message larger than this will receive an error back from
+the broker, and the message will not be accepted. As with all byte sizes specified on
+the broker, this configuration deals with compressed message size, which means that
+producers can send messages that are much larger than this value uncompressed,
+provided they compress to under the configured message.max.bytes size.
+32 | Chapter 2: Installing Kafka
+
+=== PAGE 62 ===
+There are noticeable performance impacts from increasing the allowable message
+size. Larger messages will mean that the broker threads that deal with processing net‐
+work connections and requests will be working longer on each request. Larger mes‐
+sages also increase the size of disk writes, which will impact I/O throughput. Other
+storage solutions, such as blob stores and/or tiered storage, may be another method
+of addressing large disk write issues, but will not be covered in this chapter.
+Coordinating Message Size Configurations
+The message size configured on the Kafka broker must be coordi‐
+nated with the fetch.message.max.bytes configuration on con‐
+sumer clients. If this value is smaller than message.max.bytes,
+then consumers that encounter larger messages will fail to fetch
+those messages, resulting in a situation where the consumer gets
+stuck and cannot proceed. The same rule applies to the
+replica.fetch.max.bytes configuration on the brokers when
+configured in a cluster.
+Selecting Hardware
+Selecting an appropriate hardware configuration for a Kafka broker can be more art
+than science. Kafka itself has no strict requirement on a specific hardware configura‐
+tion and will run without issue on most systems. Once performance becomes a con‐
+cern, however, there are several factors that can contribute to the overall performance
+bottlenecks: disk throughput and capacity, memory, networking, and CPU. When
+scaling Kafka very large, there can also be constraints on the number of partitions
+that a single broker can handle due to the amount of metadata that needs to be upda‐
+ted. Once you have determined which performance types are the most critical for
+your environment, you can select an optimized hardware configuration appropriate
+for your budget.
+Disk Throughput
+The performance of producer clients will be most directly influenced by the through‐
+put of the broker disk that is used for storing log segments.  Kafka messages must be
+committed to local storage when they are produced, and most clients will wait until at
+least one broker has confirmed that messages have been committed before consider‐
+ing the send successful. This means that faster disk writes will equal lower produce
+latency.
+The obvious decision when it comes to disk throughput is whether to use traditional
+spinning hard disk drives (HDDs) or solid-state disks (SSDs). SSDs have drastically
+lower seek and access times and will provide the best performance. HDDs, on the
+other hand, are more economical and provide more capacity per unit. Y ou can also
+Selecting Hardware | 33
+
+=== PAGE 63 ===
+improve the performance of HDDs by using more of them in a broker, whether by
+having multiple data directories or by setting up the drives in a redundant array of
+independent disks (RAID) configuration. Other factors, such as the specific drive
+technology (e.g., serial attached storage or serial ATA), as well as the quality of the
+drive controller, will affect throughput. Generally, observations show that HDD
+drives are typically more useful for clusters with very high storage needs but aren’t
+accessed as often, while SSDs are better options if there is a very large number of cli‐
+ent connections.
+Disk Capacity
+Capacity is the other side of the storage discussion. The amount of disk capacity that
+is needed is determined by how many messages need to be retained at any time. If the
+broker is expected to receive 1 TB of traffic each day, with 7 days of retention, then
+the broker will need a minimum of 7 TB of usable storage for log segments. Y ou
+should also factor in at least 10% overhead for other files, in addition to any buffer
+that you wish to maintain for fluctuations in traffic or growth over time.
+Storage capacity is one of the factors to consider when sizing a Kafka cluster and
+determining when to expand it. The total traffic for a cluster can be balanced across
+the cluster by having multiple partitions per topic, which will allow additional brok‐
+ers to augment the available capacity if the density on a single broker will not suffice.
+The decision on how much disk capacity is needed will also be informed by the repli‐
+cation strategy chosen for the cluster (which is discussed in more detail in Chapter 7).
+Memory
+The normal mode of operation for a Kafka consumer is reading from the end of the
+partitions, where the consumer is caught up and lagging behind the producers very
+little, if at all. In this situation, the messages the consumer is reading are optimally
+stored in the system’s page cache, resulting in faster reads than if the broker has to
+reread the messages from disk. Therefore, having more memory available to the sys‐
+tem for page cache will improve the performance of consumer clients.
+Kafka itself does not need much heap memory configured for the Java Virtual
+Machine (JVM). Even a broker that is handling 150,000 messages per second and a
+data rate of 200 megabits per second can run with a 5 GB heap. The rest of the system
+memory will be used by the page cache and will benefit Kafka by allowing the system
+to cache log segments in use. This is the main reason it is not recommended to have
+Kafka colocated on a system with any other significant application, as it will have to
+share the use of the page cache. This will decrease the consumer performance for
+Kafka.
+34 | Chapter 2: Installing Kafka
+
+=== PAGE 64 ===
+Networking
+The available network throughput will specify the maximum amount of traffic that
+Kafka can handle. This can be a governing factor, combined with disk storage, for
+cluster sizing. This is complicated by the inherent imbalance between inbound and
+outbound network usage that is created by Kafka’s support for multiple consumers. A
+producer may write 1 MB per second for a given topic, but there could be any num‐
+ber of consumers that create a multiplier on the outbound network usage. Other
+operations, such as cluster replication (covered in Chapter 7 ) and mirroring (dis‐
+cussed in Chapter 10), will also increase requirements. Should the network interface
+become saturated, it is not uncommon for cluster replication to fall behind, which
+can leave the cluster in a vulnerable state. To prevent the network from being a major
+governing factor, it is recommended to run with at least 10 Gb NICs (Network Inter‐
+face Cards). Older machines with 1 Gb NICs are easily saturated and aren’t
+recommended.
+CPU
+Processing power is not as important as disk and memory until you begin to scale
+Kafka very large, but it will affect overall performance of the broker to some extent.
+Ideally, clients should compress messages to optimize network and disk usage. The
+Kafka broker must decompress all message batches, however, in order to validate the
+checksum of the individual messages and assign offsets. It then needs to recompress
+the message batch in order to store it on disk. This is where most of Kafka’s require‐
+ment for processing power comes from. This should not be the primary factor in
+selecting hardware, however, unless clusters become very large with hundreds of
+nodes and millions of partitions in a single cluster. At that point, selecting more per‐
+formant CPU can help reduce cluster sizes.
+Kafka in the Cloud

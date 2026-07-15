@@ -1,0 +1,200 @@
+always an imbalance in the load of the Kafka cluster. While Kafka attempts to keep
+the data within the cluster evenly spread across all brokers, this does not mean that
+client access to that data is evenly distributed. It also does not detect issues such as
+hot partitions. It is highly recommended that you utilize an external tool for keeping
+Kafka Broker Metrics | 347
+
+=== PAGE 377 ===
+the cluster balanced at all times. One such tool is Cruise Control, an application that
+continually monitors the cluster and rebalances partitions within it. It also provides a
+number of other administrative functions, such as adding and removing brokers.
+Preferred Replica Elections
+The first step before trying to diagnose a problem further is to
+ensure that you have run a preferred replica election (see Chap‐
+ter 12) recently. Kafka brokers do not automatically take partition
+leadership back (unless auto leader rebalance is enabled) after they
+have released leadership (e.g., when the broker has failed or been
+shut down). This means that it’s very easy for leader replicas to
+become unbalanced in a cluster. The preferred replica election is
+safe and easy to run, so it’s a good idea to do that first and see if the
+problem goes away.
+Overloaded clusters are another problem that is easy to detect. If the cluster is bal‐
+anced, and many of the brokers are showing elevated latency for requests or a low
+request handler pool idle ratio, you are reaching the limits of your brokers to serve
+traffic for this cluster. Y ou may find upon deeper inspection that you have a client
+that has changed its request pattern and is now causing problems. Even when this
+happens, however, there may be little you can do about changing the client. The solu‐
+tions available to you are either to reduce the load to the cluster or increase the num‐
+ber of brokers.
+Problems with the controller in the Kafka cluster are much more difficult to diagnose
+and often fall into the category of bugs in Kafka itself. These issues manifest as broker
+metadata being out of sync, offline replicas when the brokers appear to be fine, and
+topic control actions like creation not happening properly. If you’re scratching your
+head over a problem in the cluster and saying “That’s really weird, ” there is a very
+good chance that it is because the controller did something unpredictable and bad.
+There are not a lot of ways to monitor the controller, but monitoring the active con‐
+troller count as well as the controller queue size will give you a high-level indicator if
+there is a problem.
+The Art of Under-Replicated Partitions
+One of the most popular metrics to use when monitoring Kafka is under-replicated
+partitions. This measurement, provided on each broker in a cluster, gives a count of
+the number of partitions for which the broker is the leader replica, where the follower
+replicas are not caught up. This single measurement provides insight into a number
+of problems with the Kafka cluster, from a broker being down to resource exhaustion.
+With the wide variety of problems that this metric can indicate, it is worthy of an
+in-depth look at how to respond to a value other than zero. Many of the metrics used
+348 | Chapter 13: Monitoring Kafka
+
+=== PAGE 378 ===
+in diagnosing these types of problems will be described later in this chapter. See
+Table 13-3 for more details on under-replicated partitions.
+Table 13-3. Metrics and their corresponding under-replicated partitions
+Metric name Under-replicated partitions
+JMX MBean kafka.server:type=ReplicaManager,name=UnderReplicatedPartitions
+Value range Integer, zero or greater
+The URP Alerting Trap
+In the previous edition of this book, as well as in many conference
+talks, the authors have spoken at length about the fact that the
+under-replicated partitions (URP) metric should be your primary
+alerting metric because of how many problems it describes. This
+approach has a significant number of problems, not the least of
+which is that the URP metric can frequently be nonzero for benign
+reasons. This means that as someone operating a Kafka cluster, you
+will receive false alerts, which lead to the alert being ignored. It also
+requires a significant amount of knowledge to be able to under‐
+stand what the metric is telling you. For this reason, we no longer
+recommend the use of URP for alerting. Instead, you should
+depend on SLO-based alerting to detect unknown problems.
+A steady (unchanging) number of under-replicated partitions reported by many of
+the brokers in a cluster normally indicates that one of the brokers in the cluster is off‐
+line. The count of under-replicated partitions across the entire cluster will equal the
+number of partitions that are assigned to that broker, and the broker that is down will
+not report a metric. In this case, you will need to investigate what has happened to
+that broker and resolve that situation. This is often a hardware failure, but it could
+also be an OS or Java issue that has caused the problem.
+If the number of under-replicated partitions is fluctuating, or if the number is steady
+but there are no brokers offline, this typically indicates a performance issue in the
+cluster. These types of problems are much harder to diagnose due to their variety, but
+there are several steps you can work through to narrow it down to the most likely
+causes. The first step is to try and determine if the problem relates to a single broker
+or to the entire cluster. This can sometimes be a difficult question to answer. If the
+under-replicated partitions are on a single broker, as in the following example, then
+that broker is typically the problem. The error shows that other brokers are having a
+problem replicating messages from that one.
+Kafka Broker Metrics | 349
+
+=== PAGE 379 ===
+If several brokers have under-replicated partitions, it could be a cluster problem, but
+it might still be a single broker. In that case, it would be because a single broker is
+having problems replicating messages from everywhere, and you’ll have to figure out
+which broker it is. One way to do this is to get a list of under-replicated partitions for
+the cluster and see if there is a specific broker that is common to all of the partitions
+that are under-replicated. Using the kafka-topics.sh tool (discussed in detail in
+Chapter 12), you can get a list of under-replicated partitions to look for a common
+thread.
+For example, list under-replicated partitions in a cluster:
+# kafka-topics.sh --bootstrap-server kafka1.example.com:9092/kafka-cluster
+--describe --under-replicated
+    Topic: topicOne   Partition: 5    Leader: 1    Replicas: 1,2 Isr: 1
+    Topic: topicOne   Partition: 6    Leader: 3    Replicas: 2,3 Isr: 3
+    Topic: topicTwo   Partition: 3    Leader: 4    Replicas: 2,4 Isr: 4
+    Topic: topicTwo   Partition: 7    Leader: 5    Replicas: 5,2 Isr: 5
+    Topic: topicSix   Partition: 1    Leader: 3    Replicas: 2,3 Isr: 3
+    Topic: topicSix   Partition: 2    Leader: 1    Replicas: 1,2 Isr: 1
+    Topic: topicSix   Partition: 5    Leader: 6    Replicas: 2,6 Isr: 6
+    Topic: topicSix   Partition: 7    Leader: 7    Replicas: 7,2 Isr: 7
+    Topic: topicNine  Partition: 1    Leader: 1    Replicas: 1,2 Isr: 1
+    Topic: topicNine  Partition: 3    Leader: 3    Replicas: 2,3 Isr: 3
+    Topic: topicNine  Partition: 4    Leader: 3    Replicas: 3,2 Isr: 3
+    Topic: topicNine  Partition: 7    Leader: 3    Replicas: 2,3 Isr: 3
+    Topic: topicNine  Partition: 0    Leader: 3    Replicas: 2,3 Isr: 3
+    Topic: topicNine  Partition: 5    Leader: 6    Replicas: 6,2 Isr: 6
+#
+In this example, the common broker is number 2. This indicates that this broker is
+having a problem with message replication and will lead us to focus our investigation
+on that one broker. If there is no common broker, there is likely a cluster-wide
+problem.
+Cluster-level problems
+Cluster problems usually fall into one of two categories:
+• Unbalanced load
+• Resource exhaustion
+The first problem, unbalanced partitions or leadership, is the easiest to find even
+though fixing it can be an involved process. In order to diagnose this problem, you
+will need several metrics from the brokers in the cluster:
+• Partition count
+• Leader partition count
+350 | Chapter 13: Monitoring Kafka
+
+=== PAGE 380 ===
+• All topics messages in rate
+• All topics bytes in rate
+• All topics bytes out rate
+Examine these metrics. In a perfectly balanced cluster, the numbers will be even
+across all brokers in the cluster, as in Table 13-4.
+Table 13-4. Utilization metrics
+Broker Partitions Leaders Messages in Bytes in Bytes out
+1 100 50 13130 msg/s 3.56 MBps 9.45 MBps
+2 101 49 12842 msg/s 3.66 MBps 9.25 MBps
+3 100 50 13086 msg/s 3.23 MBps 9.82 MBps
+This indicates that all the brokers are taking approximately the same amount of traf‐
+fic. Assuming you have already run a preferred replica election, a large deviation
+indicates that the traffic is not balanced within the cluster.  To resolve this, you will
+need to move partitions from the heavily loaded brokers to the less heavily loaded
+brokers. This is done using the kafka-reassign-partitions.sh tool described in
+Chapter 12.
+Helpers for Balancing Clusters
+The Kafka broker itself does not provide for automatic reassign‐
+ment of partitions in a cluster. This means that balancing traffic
+within a Kafka cluster can be a mind-numbing process of manually
+reviewing long lists of metrics and trying to come up with a replica
+assignment that works. To help with this, some organizations have
+developed automated tools for performing this task. One example
+is the kafka-assigner tool that LinkedIn has released in the open
+source kafka-tools repository on GitHub. Some enterprise offerings
+for Kafka support also provide this feature.
+Another common cluster performance issue is exceeding the capacity of the brokers
+to serve requests. There are many possible bottlenecks that could slow things down:
+CPU, disk IO, and network throughput are a few of the most common. Disk utiliza‐
+tion is not one of them, as the brokers will operate properly right up until the disk is
+filled, and then this disk will fail abruptly. In order to diagnose a capacity problem,
+there are many metrics you can track at the OS level, including:
+• CPU utilization
+• Inbound network throughput
+• Outbound network throughput
+Kafka Broker Metrics | 351
+
+=== PAGE 381 ===
+• Disk average wait time
+• Disk percent utilization
+Exhausting any of these resources will typically show up as the same problem: under-
+replicated partitions. It’s critical to remember that the broker replication process
+operates in exactly the same way that other Kafka clients do. If your cluster is having
+problems with replication, then your customers are having problems with producing
+and consuming messages as well. It makes sense to develop a baseline for these met‐
+rics when your cluster is operating correctly and then set thresholds that indicate a
+developing problem long before you run out of capacity. Y ou will also want to review
+the trend for these metrics as the traffic to your cluster increases over time. As far as
+Kafka broker metrics are concerned, the All Topics Bytes In Rate is a good guide‐
+line to show cluster usage.
+Host-level problems
+If the performance problem with Kafka is not present in the entire cluster and can be 
+isolated to one or two brokers, it’s time to examine that server and see what makes it
+different from the rest of the cluster. These types of problems fall into several general
+categories:
+• Hardware failures
+• Networking
+• Conflicts with another process
+• Local configuration differences
+Typical Servers and Problems
+A server and its OS is a complex machine with thousands of com‐
+ponents, any of which could have problems and cause either a
+complete failure or just a performance degradation. It’s impossible
+for us to cover everything that can fail in this book—numerous vol‐
+umes have been written, and will continue to be, on this subject.
+But we can discuss some of the most common problems that are
+seen. This section will focus on issues with a typical server running
+a Linux OS.
+Hardware failures are sometimes obvious, like when the server just stops working,
+but it’s the less obvious problems that cause performance issues. These are usually
+soft failures that allow the system to keep running but degrade operation. This could
+be a bad bit of memory, where the system has detected the problem and bypassed that

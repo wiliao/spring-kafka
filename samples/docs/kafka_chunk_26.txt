@@ -1,0 +1,200 @@
+ber a time when during an upgrade, the configuration file for the brokers was acci‐
+dentally replaced with a broken copy. This was discovered after restarting the first
+broker and noticing that it failed to start. The team did not have a way to recover the
+original, and we prepared for significant trial and error as we attempted to recon‐
+struct the correct configuration and bring the broker back to life. A site reliability
+engineer (SRE) saved the day by connecting to one of the remaining brokers and
+dumping its configuration using the AdminClient.
+Consumer Group Management
+We’ve mentioned before that unlike most message queues, Kafka allows you to
+reprocess data in the exact order in which it was consumed and processed earlier. In
+Chapter 4, where we discussed consumer groups, we explained how to use the Con‐
+sumer APIs to go back and reread older messages from a topic. But using these APIs
+means that you programmed the ability to reprocess data in advance into your appli‐
+cation. Y our application itself must expose the “reprocess” functionality.
+There are several scenarios in which you’ll want to cause an application to reprocess
+messages, even if this capability was not built into the application in advance.
+Troubleshooting a malfunctioning application during an incident is one such sce‐
+nario. Another is when preparing an application to start running on a new cluster
+during a disaster recovery failover scenario (we’ll discuss this in more detail in Chap‐
+ter 9, when we discuss disaster recovery techniques).
+In this section, we’ll look at how you can use the AdminClient to programmatically
+explore and modify consumer groups and the offsets that were committed by those
+groups. In Chapter 10  we’ll look at external tools available to perform the same
+operations.
+Exploring Consumer Groups
+If you want to explore and modify consumer groups, the first step is to list them:
+admin.listConsumerGroups().valid().get().forEach(System.out::println);
+Note that by using valid() method, the collection that get() will return will only
+contain the consumer groups that the cluster returned without errors, if any. Any
+errors will be completely ignored, rather than thrown as exceptions. The errors()
+method can be used to get all the exceptions. If you use all() as we did in other
+Consumer Group Management | 123
+
+=== PAGE 153 ===
+examples, only the first error the cluster returned will be thrown as an exception.
+Likely causes of such errors are authorization, where you don’t have permission to
+view the group, or cases when the coordinator for some of the consumer groups is
+not available.
+If we want more information about some of the groups, we can describe them:
+ConsumerGroupDescription groupDescription = admin
+        .describeConsumerGroups(CONSUMER_GRP_LIST)
+        .describedGroups().get(CONSUMER_GROUP).get();
+        System.out.println("Description of group " + CONSUMER_GROUP
+                + ":" + groupDescription);
+The description contains a wealth of information about the group. This includes the
+group members, their identifiers and hosts, the partitions assigned to them, the algo‐
+rithm used for the assignment, and the host of the group coordinator. This descrip‐
+tion is very useful when troubleshooting consumer groups. One of the most
+important pieces of information about a consumer group is missing from this
+description—inevitably, we’ll want to know what was the last offset committed by the
+group for each partition that it is consuming and how much it is lagging behind the
+latest messages in the log.
+In the past, the only way to get this information was to parse the commit messages
+that the consumer groups wrote to an internal Kafka topic. While this method
+accomplished its intent, Kafka does not guarantee compatibility of the internal mes‐
+sage formats, and therefore the old method is not recommended. We’ll take a look at
+how Kafka’s AdminClient allows us to retrieve this information:
+Map<TopicPartition, OffsetAndMetadata> offsets =
+        admin.listConsumerGroupOffsets(CONSUMER_GROUP)
+                .partitionsToOffsetAndMetadata().get(); 
+Map<TopicPartition, OffsetSpec> requestLatestOffsets = new HashMap<>();
+for(TopicPartition tp: offsets.keySet()) {
+    requestLatestOffsets.put(tp, OffsetSpec.latest()); 
+}
+Map<TopicPartition, ListOffsetsResult.ListOffsetsResultInfo> latestOffsets =
+        admin.listOffsets(requestLatestOffsets).all().get();
+for (Map.Entry<TopicPartition, OffsetAndMetadata> e: offsets.entrySet()) { 
+    String topic = e.getKey().topic();
+    int partition =  e.getKey().partition();
+    long committedOffset = e.getValue().offset();
+    long latestOffset = latestOffsets.get(e.getKey()).offset();
+    System.out.println("Consumer group " + CONSUMER_GROUP
+            + " has committed offset " + committedOffset
+            + " to topic " + topic + " partition " + partition
+124 | Chapter 5: Managing Apache Kafka Programmatically
+
+=== PAGE 154 ===
+            + ". The latest offset in the partition is "
+            +  latestOffset + " so consumer group is "
+            + (latestOffset - committedOffset) + " records behind");
+}
+We retrieve a map of all topics and partitions that the consumer group handles,
+and the latest committed offset for each. Note that unlike describeConsumer
+Groups, listConsumerGroupOffsets only accepts a single consumer group and
+not a collection.
+For each topic and partition in the results, we want to get the offset of the last
+message in the partition. OffsetSpec has three very convenient implementations:
+earliest(), latest(), and forTimestamp(), which allow us to get the earlier
+and latest offsets in the partition, as well as the offset of the record written on or
+immediately after the time specified.
+Finally, we iterate over all the partitions, and for each partition print the last
+committed offset, the latest offset in the partition, and the lag between them.
+Modifying Consumer Groups
+Until now, we just explored available information. AdminClient also has methods for 
+modifying consumer groups: deleting groups, removing members, deleting commit‐
+ted offsets, and modifying offsets. These are commonly used by SREs to build ad hoc
+tooling to recover from an emergency.
+From all those, modifying offsets is the most useful. Deleting offsets might seem like a
+simple way to get a consumer to “start from scratch, ” but this really depends on the
+configuration of the consumer—if the consumer starts and no offsets are found, will
+it start from the beginning? Or jump to the latest message? Unless we have the value
+of auto.offset.reset, we can’t know. Explicitly modifying the committed offsets to
+the earliest available offsets will force the consumer to start processing from the
+beginning of the topic, and essentially cause the consumer to “reset. ”
+Do keep in mind that consumer groups don’t receive updates when offsets change in
+the offset topic. They only read offsets when a consumer is assigned a new partition
+or on startup. To prevent you from making changes to offsets that the consumers will
+not know about (and will therefore override), Kafka will prevent you from modifying
+offsets while the consumer group is active.
+Also keep in mind that if the consumer application maintains state (and most stream
+processing applications maintain state), resetting the offsets and causing the con‐
+sumer group to start processing from the beginning of the topic can have a strange
+impact on the stored state. For example, suppose you have a stream application that is
+continuously counting shoes sold in your store, and suppose that at 8:00 a.m. you
+Consumer Group Management | 125
+
+=== PAGE 155 ===
+discover that there was an error in inputs and you want to completely recalculate the
+count since 3:00 a.m. If you reset the offsets to 3:00 a.m. without appropriately modi‐
+fying the stored aggregate, you will count every shoe that was sold today twice (you
+will also process all the data between 3:00 a.m. and 8:00 a.m., but let’s assume that this
+is necessary to correct the error). Y ou need to take care to update the stored state
+accordingly. In a development environment, we usually delete the state store com‐
+pletely before resetting the offsets to the start of the input topic.
+With all these warnings in mind, let’s look at an example:
+Map<TopicPartition, ListOffsetsResult.ListOffsetsResultInfo> earliestOffsets =
+    admin.listOffsets(requestEarliestOffsets).all().get(); 
+Map<TopicPartition, OffsetAndMetadata> resetOffsets = new HashMap<>();
+for (Map.Entry<TopicPartition, ListOffsetsResult.ListOffsetsResultInfo> e:
+        earliestOffsets.entrySet()) {
+  resetOffsets.put(e.getKey(), new OffsetAndMetadata(e.getValue().offset())); 
+}
+try {
+  admin.alterConsumerGroupOffsets(CONSUMER_GROUP, resetOffsets).all().get(); 
+} catch (ExecutionException e) {
+  System.out.println("Failed to update the offsets committed by group "
+            + CONSUMER_GROUP + " with error " + e.getMessage());
+  if (e.getCause() instanceof UnknownMemberIdException)
+      System.out.println("Check if consumer group is still active."); 
+}
+To reset the consumer group so it will start processing from the earliest offset, we
+need to get the earliest offsets first. Getting the earliest offsets is similar to getting
+the latest, shown in the previous example.
+In this loop we convert the map with ListOffsetsResultInfo values that were
+returned by listOffsets into a map with OffsetAndMetadata values that are
+required by alterConsumerGroupOffsets.
+After calling alterConsumerGroupOffsets, we are waiting on the Future to com‐
+plete so we can see if it completed successfully.
+One of the most common reasons that alterConsumerGroupOffsets fails is that
+we didn’t stop the consumer group first (this has to be done by shutting down the
+consuming application directly; there is no admin command for shutting down a
+consumer group). If the group is still active, our attempt to modify the offsets
+will appear to the consumer coordinator as if a client that is not a member of the
+group is committing an offset for that group. In this case, we’ll get Unknown
+MemberIdException.
+126 | Chapter 5: Managing Apache Kafka Programmatically
+
+=== PAGE 156 ===
+Cluster Metadata
+It is rare that an application has to explicitly discover anything at all about the cluster
+to which it connected. Y ou can produce and consume messages without ever learning
+how many brokers exist and which one is the controller. Kafka clients abstract away
+this information—clients only need to be concerned with topics and partitions.
+But just in case you are curious, this little snippet will satisfy your curiosity:
+DescribeClusterResult cluster = admin.describeCluster();
+System.out.println("Connected to cluster " + cluster.clusterId().get()); 
+System.out.println("The brokers in the cluster are:");
+cluster.nodes().get().forEach(node -> System.out.println("    * " + node));
+System.out.println("The controller is: " + cluster.controller().get());
+Cluster identifier is a GUID and therefore is not human readable. It is still useful
+to check whether your client connected to the correct cluster.
+Advanced Admin Operations
+In this section, we’ll discuss a few methods that are rarely used, and can be risky to
+use, but are incredibly useful when needed. Those are mostly important for SREs dur‐
+ing incidents—but don’t wait until you are in an incident to learn how to use them.
+Read and practice before it is too late. Note that the methods here have little to do
+with one another, except that they all fit into this category.
+Adding Partitions to a Topic
+Usually the number of partitions in a topic is set when a topic is created. And since
+each partition can have very high throughput, bumping against the capacity limits of
+a topic is rare. In addition, if messages in the topic have keys, then consumers can
+assume that all messages with the same key will always go to the same partition and
+will be processed in the same order by the same consumer.
+For these reasons, adding partitions to a topic is rarely needed and can be risky. Y ou’ll
+need to check that the operation will not break any application that consumes from
+the topic. At times, however, you will really hit the ceiling of how much throughput
+you can process with the existing partitions and have no choice but to add some.
+Y ou can add partitions to a collection of topics using the createPartitions method.
+Note that if you try to expand multiple topics at once, it is possible that some of the
+topics will be successfully expanded, while others will fail.
+Map<String, NewPartitions> newPartitions = new HashMap<>();
+newPartitions.put(TOPIC_NAME, NewPartitions.increaseTo(NUM_PARTITIONS+2)); 
+admin.createPartitions(newPartitions).all().get();
+Cluster Metadata | 127
+
+=== PAGE 157 ===
+When expanding topics, you need to specify the total number of partitions the
+topic will have after the partitions are added, not the number of new partitions.
+Since the createPartition method takes as a parameter the total
+number of partitions in the topic after new partitions are added,

@@ -1,0 +1,200 @@
+continuous but nonblocking processing.
+It is important to note that the definition doesn’t mandate any specific framework,
+API, or feature. As long as we are continuously reading data from an unbounded
+dataset, doing something to it, and emitting output, we are doing stream processing.
+But the processing has to be continuous and ongoing. A process that starts every day
+at 2:00 a.m., reads 500 records from the stream, outputs a result, and goes away
+doesn’t quite cut it as far as stream processing goes.
+Stream Processing Concepts
+Stream processing is very similar to any type of data processing—we write code that
+receives data, does something with the data (a few transformations, aggregates,
+enrichments, etc.), and then place the result somewhere. However, there are some key
+concepts that are unique to stream processing and often cause confusion when some‐
+one who has data processing experience first attempts to write stream processing
+applications. Let’s take a look at a few of those concepts.
+Topology
+A stream processing application includes one or more processing topologies. A pro‐
+cessing topology starts with one or more source streams that are passed through a
+graph of stream processors connected through event streams, until results are written
+Stream Processing Concepts | 385
+
+=== PAGE 415 ===
+to one or more sink streams. Each stream processor is a computational step applied
+to the stream of events in order to transform the events. Examples of some stream
+processors we’ll use in our examples are filter, count, group-by, and left-join. We
+often visualize stream processing applications by drawing the processing nodes and
+connecting them with arrows to show how events flow from one node to the next as
+the application is processing data.
+Time
+Time is probably the most important concept in stream processing and often the
+most confusing. For an idea of how complex time can get when discussing distributed
+systems, we recommend Justin Sheehy’s excellent paper, “There Is No Now” . In the
+context of stream processing, having a common notion of time is critical because
+most stream applications perform operations on time windows. For example, our
+stream application might calculate a moving five-minute average of stock prices. In
+that case, we need to know what to do when one of our producers goes offline for two
+hours due to network issues and returns with two hours’ worth of data—most of the
+data will be relevant for five-minute time windows that have long passed and for
+which the result was already calculated and stored.
+Stream processing systems typically refer to the following notions of time:
+Event time
+This is the time the events we are tracking occurred and the record was created—
+the time a measurement was taken, an item was sold at a shop, a user viewed a
+page on our website, etc. In version 0.10.0 and later, Kafka automatically adds the
+current time to producer records at the time they are created. If this does not
+match the application’s notion of event time, such as in cases where the Kafka
+record is created based on a database record sometime after the event occurred,
+then we recommend adding the event time as a field in the record itself so that
+both timestamps will be available for later processing. Event time is usually the
+time that matters most when processing stream data.
+Log append time
+This is the time the event arrived at the Kafka broker and was stored there, also
+called ingestion time. In version 0.10.0 and later, Kafka brokers will automatically
+add this time to records they receive if Kafka is configured to do so or if the
+records arrive from older producers and contain no timestamps. This notion of
+time is typically less relevant for stream processing, since we are usually interes‐
+ted in the times the events occurred. For example, if we calculate the number of
+devices produced per day, we want to count devices that were actually produced
+on that day, even if there were network issues and the event only arrived to Kafka
+the following day. However, in cases where the real event time was not recorded,
+log append time can still be used consistently because it does not change after the
+386 | Chapter 14: Stream Processing
+
+=== PAGE 416 ===
+record was created, and assuming no delays in the pipeline, it can be a reasonable
+approximation of event time.
+Processing time
+This is the time at which a stream processing application received the event in
+order to perform some calculation. This time can be milliseconds, hours, or days
+after the event occurred. This notion of time assigns different timestamps to the
+same event depending on exactly when each stream processing application hap‐
+pened to read the event. It can even differ for two threads in the same applica‐
+tion! Therefore, this notion of time is highly unreliable and best avoided.
+Kafka Streams assigns time to each event based on the TimestampExtractor inter‐
+face. Developers of Kafka Streams applications can use different implementations of
+this interface, which can use either of the three time semantics explained previously
+or a completely different choice of timestamp, including extracting a timestamp from
+the contents of the event itself.
+When Kafka Streams writes output to a Kafka topic, it assigns a timestamp to each
+event based on the following rules:
+• When the output record maps directly to an input record, the output record will
+use the same timestamp as the input.
+• When the output record is a result of an aggregation, the timestamp of the out‐
+put record will be the maximum timestamp used in the aggregation.
+• When the output record is a result of joining two streams, the timestamp of the
+output record is the largest of the two records being joined. When a stream and a
+table are joined, the timestamp from the stream record is used.
+• Finally, if the output record was generated by a Kafka Streams function that gen‐
+erates data in a specific schedule regardless of input, such as punctuate(), the
+output timestamp will depend on the current internal times of the stream pro‐
+cessing app.
+When using the Kafka Streams lower-level processing API rather than the DSL, Kafka
+Streams includes APIs for manipulating the timestamps of records directly, so devel‐
+opers can implement timestamp semantics that match the required business logic of
+the application.
+Stream Processing Concepts | 387
+
+=== PAGE 417 ===
+Mind the Time Zone
+When working with time, it is important to be mindful of time
+zones. The entire data pipeline should standardize on a single time
+zone; otherwise, results of stream operations will be confusing and
+often meaningless. If you must handle data streams with different
+time zones, you need to make sure you can convert events to a sin‐
+gle time zone before performing operations on time windows.
+Often this means storing the time zone in the record itself.
+State
+As long as we only need to process each event individually, stream processing is a
+very simple activity. For example, if all we need to do is read a stream of online shop‐
+ping transactions from Kafka, find the transactions over $10,000, and email the rele‐
+vant salesperson, we can probably write this in just few lines of code using a Kafka
+consumer and SMTP library.
+Stream processing becomes really interesting when we have operations that involve
+multiple events: counting the number of events by type, moving averages, joining two
+streams to create an enriched stream of information, etc. In those cases, it is not
+enough to look at each event by itself; we need to keep track of more information—
+how many events of each type did we see this hour, all events that require joining,
+sums, averages, etc. We call this information a state.
+It is often tempting to store the state in variables that are local to the stream process‐
+ing app, such as a simple hash table to store moving counts. In fact, we did just that in
+many examples in this book. However, this is not a reliable approach for managing
+state in stream processing because when the stream processing application is stopped
+or crashes, the state is lost, which changes the results. This is usually not the desired
+outcome, so care should be taken to persist the most recent state and recover it when
+restarting the application.
+Stream processing refers to several types of state:
+Local or internal state
+State that is accessible only by a specific instance of the stream processing appli‐
+cation. This state is usually maintained and managed with an embedded, in-
+memory database running within the application. The advantage of local state is
+that it is extremely fast. The disadvantage is that we are limited to the amount of
+memory available. As a result, many of the design patterns in stream processing
+focus on ways to partition the data into substreams that can be processed using a
+limited amount of local state.
+388 | Chapter 14: Stream Processing
+
+=== PAGE 418 ===
+External state
+State that is maintained in an external data store, often a NoSQL system like Cas‐
+sandra. The advantages of an external state are its virtually unlimited size and the
+fact that it can be accessed from multiple instances of the application or even
+from different applications. The downside is the extra latency and complexity
+introduced with an additional system, as well as availability—the application
+needs to handle the possibility that the external system is not available. Most
+stream processing apps try to avoid having to deal with an external store, or at
+least limit the latency overhead by caching information in the local state and
+communicating with the external store as rarely as possible. This usually introdu‐
+ces challenges with maintaining consistency between the internal and external
+state.
+Stream-Table Duality
+We are all familiar with database tables. A table is a collection of records, each identi‐
+fied by its primary key and containing a set of attributes as defined by a schema.
+Table records are mutable (i.e., tables allow update and delete operations). Querying a
+table allows checking the state of the data at a specific point in time. For example, by
+querying the CUSTOMERS_CONTACTS table in a database, we expect to find current con‐
+tact details for all our customers. Unless the table was specifically designed to include
+history, we will not find their past contacts in the table.
+Unlike tables, streams contain a history of changes. A stream is a string of events
+wherein each event caused a change. A table contains a current state of the world,
+which is the result of many changes. From this description, it is clear that streams and
+tables are two sides of the same coin—the world always changes, and sometimes we
+are interested in the events that caused those changes, whereas other times we are
+interested in the current state of the world. Systems that allow us to transition back
+and forth between the two ways of looking at data are more powerful than systems
+that support just one.
+To convert a table to a stream, we need to capture the changes that modify the table.
+Take all those insert, update, and delete events and store them in a stream. Most
+databases offer change data capture (CDC) solutions for capturing these changes, and
+there are many Kafka connectors that can pipe those changes into Kafka where they
+will be available for stream processing.
+To convert a stream to a table, we need to apply all the changes that the stream con‐
+tains. This is also called materializing the stream. We create a table, either in memory,
+in an internal state store, or in an external database, and start going over all the events
+in the stream from beginning to end, changing the state as we go. When we finish, we
+have a table representing a state at a specific time that we can use.
+Stream Processing Concepts | 389
+
+=== PAGE 419 ===
+Suppose we have a store selling shoes. A stream representation of our retail activity
+can be a stream of events:
+“Shipment arrived with red, blue, and green shoes. ”
+“Blue shoes sold. ”
+“Red shoes sold. ”
+“Blue shoes returned. ”
+“Green shoes sold. ”
+If we want to know what our inventory contains right now or how much money we
+made until now, we need to materialize the view. Figure 14-1 shows that we currently
+have 299 red shoes. If we want to know how busy the store is, we can look at the
+entire stream and see that there were four customer events today. We may also want
+to investigate why the blue shoes were returned.
+Figure 14-1. Materializing inventory changes
+Time Windows
+Most operations on streams are windowed operations, operating on slices of time:
+moving averages, top products sold this week, 99th percentile load on the system, etc.
+Join operations on two streams are also windowed—we join events that occurred at
+the same slice of time. Very few people stop and think about the type of window they
+want for their operations. For example, when calculating moving averages, we want to
+know:
+Size of the window
+Do we want to calculate the average of all events in every five-minute window?
+Every 15-minute window? Or the entire day? Larger windows are smoother but

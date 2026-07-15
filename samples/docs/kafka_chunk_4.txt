@@ -1,0 +1,200 @@
+707-829-0104 (fax)
+We have a web page for this book, where we list errata, examples, and any additional
+information. Y ou can access this page at https://oreil.ly/kafka-tdg2.
+Email bookquestions@oreilly.com to comment or ask technical questions about this
+book.
+For news and information about our books and courses, visit http://oreilly.com.
+Find us on Facebook: http://facebook.com/oreilly
+Follow us on Twitter: http://twitter.com/oreillymedia
+Watch us on Y ouTube: http://youtube.com/oreillymedia
+Acknowledgments
+We would like to thank the many contributors to Apache Kafka and its ecosystem.
+Without their work, this book would not exist. Special thanks to Jay Kreps, Neha Nar‐
+khede, and Jun Rao, as well as their colleagues and the leadership at LinkedIn, for
+cocreating Kafka and contributing it to the Apache Software Foundation.
+xxii | Preface
+
+=== PAGE 28 ===
+Many people provided valuable feedback on early versions of the book, and we appre‐
+ciate their time and expertise: Apurva Mehta, Arseniy Tashoyan, Dylan Scott, Ewen
+Cheslack-Postava, Grant Henke, Ismael Juma, James Cheng, Jason Gustafson, Jeff
+Holoman, Joel Koshy, Jonathan Seidman, Jun Rao, Matthias Sax, Michael Noll, Paolo
+Castagna, and Jesse Anderson. We also want to thank the many readers who left com‐
+ments and feedback via the rough-cuts feedback site.
+Many reviewers helped us out and greatly improved the quality of this book, so any
+mistakes left are our own.
+We’ d like to thank our O’Reilly first-edition editor, Shannon Cutt, for her encourage‐
+ment and patience, and for being far more on top of things than we were. Our
+second-edition editors, Jess Haberman and Gary O’Brien, kept us on track through
+global challenges. Working with O’Reilly is a great experience for an author—the sup‐
+port they provide, from tools to book signings, is unparalleled. We are grateful to
+everyone involved in making this happen, and we appreciate their choice to work
+with us.
+And we’ d like to thank our managers and colleagues for enabling and encouraging us
+while writing the book.
+Gwen wants to thank her husband, Omer Shapira, for his support and patience dur‐
+ing the many months spent writing yet another book; her cats, Luke and Lea, for
+being cuddly; and her dad, Lior Shapira, for teaching her to always say yes to oppor‐
+tunities, even when it seems daunting.
+Todd would be nowhere without his wife, Marcy, and daughters, Bella and Kaylee,
+behind him all the way. Their support for all the extra time writing, and long hours
+running to clear his head, keeps him going.
+Rajini would like to thank her husband, Manjunath, and son, Tarun, for their unwav‐
+ering support and encouragement, for spending weekends reviewing the early drafts,
+and for always being there for her.
+Krit shares his love and gratitude with his wife, Cecilia, and two children, Lucas and
+Lizabeth. Their love and support make every day a joy, and he wouldn’t be able to
+pursue his passions without them. He also wants to thank his mom, Cindy Petty, for
+instilling in Krit a desire to always be the best version of himself.
+Preface | xxiii
+
+=== PAGE 30 ===
+CHAPTER 1
+Meet Kafka
+Every enterprise is powered by data. We take information in, analyze it, manipulate it,
+and create more as output. Every application creates data, whether it is log messages,
+metrics, user activity, outgoing messages, or something else. Every byte of data has a
+story to tell, something of importance that will inform the next thing to be done. In
+order to know what that is, we need to get the data from where it is created to where
+it can be analyzed. We see this every day on websites like Amazon, where our clicks
+on items of interest to us are turned into recommendations that are shown to us a
+little later.
+The faster we can do this, the more agile and responsive our organizations can be.
+The less effort we spend on moving data around, the more we can focus on the core
+business at hand. This is why the pipeline is a critical component in the data-driven
+enterprise. How we move the data becomes nearly as important as the data itself.
+Any time scientists disagree, it’s because we have insufficient data. Then we can agree
+on what kind of data to get; we get the data; and the data solves the problem. Either I’m
+right, or you’re right, or we’re both wrong. And we move on.
+—Neil deGrasse Tyson
+Publish/Subscribe Messaging
+Before discussing the specifics of Apache Kafka, it is important for us to understand
+the concept of publish/subscribe messaging and why it is a critical component of
+data-driven applications. Publish/subscribe (pub/sub) messaging  is a pattern that is
+characterized by the sender (publisher) of a piece of data (message) not specifically
+directing it to a receiver. Instead, the publisher classifies the message somehow, and
+that receiver (subscriber) subscribes to receive certain classes of messages. Pub/sub
+1
+
+=== PAGE 31 ===
+systems often have a broker, a central point where messages are published, to facili‐
+tate this pattern.
+How It Starts
+Many use cases for publish/subscribe start out the same way: with a simple message
+queue or interprocess communication channel. For example, you create an applica‐
+tion that needs to send monitoring information somewhere, so you open a direct
+connection from your application to an app that displays your metrics on a dash‐
+board, and push metrics over that connection, as seen in Figure 1-1.
+Figure 1-1. A single, direct metrics publisher
+This is a simple solution to a simple problem that works when you are getting started
+with monitoring. Before long, you decide you would like to analyze your metrics over
+a longer term, and that doesn’t work well in the dashboard. Y ou start a new service
+that can receive metrics, store them, and analyze them. In order to support this, you
+modify your application to write metrics to both systems. By now you have three
+more applications that are generating metrics, and they all make the same connec‐
+tions to these two services. Y our coworker thinks it would be a good idea to do active
+polling of the services for alerting as well, so you add a server on each of the applica‐
+tions to provide metrics on request. After a while, you have more applications that
+are using those servers to get individual metrics and use them for various purposes.
+This architecture can look much like Figure 1-2 , with connections that are even
+harder to trace.
+2 | Chapter 1: Meet Kafka
+
+=== PAGE 32 ===
+Figure 1-2. Many metrics publishers, using direct connections
+The technical debt built up here is obvious, so you decide to pay some of it back. Y ou
+set up a single application that receives metrics from all the applications out there,
+and provide a server to query those metrics for any system that needs them. This
+reduces the complexity of the architecture to something similar to Figure 1-3. Con‐
+gratulations, you have built a publish/subscribe messaging system!
+Figure 1-3. A metrics publish/subscribe system
+Individual Queue Systems
+At the same time that you have been waging this war with metrics, one of your
+coworkers has been doing similar work with log messages. Another has been working
+on tracking user behavior on the frontend website and providing that information to
+developers who are working on machine learning, as well as creating some reports for
+management. Y ou have all followed a similar path of building out systems that decou‐
+ple the publishers of the information from the subscribers to that information.
+Figure 1-4 shows such an infrastructure, with three separate pub/sub systems.
+Publish/Subscribe Messaging | 3
+
+=== PAGE 33 ===
+Figure 1-4. Multiple publish/subscribe systems
+This is certainly a lot better than utilizing point-to-point connections (as in
+Figure 1-2), but there is a lot of duplication. Y our company is maintaining multiple
+systems for queuing data, all of which have their own individual bugs and limitations.
+Y ou also know that there will be more use cases for messaging coming soon. What
+you would like to have is a single centralized system that allows for publishing generic
+types of data, which will grow as your business grows.
+Enter Kafka
+Apache Kafka was developed as a publish/subscribe messaging system designed to
+solve this problem. It is often described as a “distributed commit log” or more
+recently as a “distributing streaming platform. ” A filesystem or database commit log is
+designed to provide a durable record of all transactions so that they can be replayed
+to consistently build the state of a system. Similarly, data within Kafka is stored dura‐
+bly, in order, and can be read deterministically. In addition, the data can be dis‐
+tributed within the system to provide additional protections against failures, as well
+as significant opportunities for scaling performance.
+Messages and Batches
+The unit of data within Kafka is called a message. If you are approaching Kafka from a
+database background, you can think of this as similar to a row or a record. A message
+is simply an array of bytes as far as Kafka is concerned, so the data contained within it
+does not have a specific format or meaning to Kafka. A message can have an optional
+piece of metadata, which is referred to as a key. The key is also a byte array and, as
+with the message, has no specific meaning to Kafka. Keys are used when messages are
+to be written to partitions in a more controlled manner. The simplest such scheme is
+to generate a consistent hash of the key and then select the partition number for that
+4 | Chapter 1: Meet Kafka
+
+=== PAGE 34 ===
+message by taking the result of the hash modulo the total number of partitions in the
+topic. This ensures that messages with the same key are always written to the same
+partition (provided that the partition count does not change).
+For efficiency, messages are written into Kafka in batches. A batch is just a collection
+of messages, all of which are being produced to the same topic and partition. An indi‐
+vidual round trip across the network for each message would result in excessive over‐
+head, and collecting messages together into a batch reduces this. Of course, this is a
+trade-off between latency and throughput: the larger the batches, the more messages
+that can be handled per unit of time, but the longer it takes an individual message to
+propagate. Batches are also typically compressed, providing more efficient data trans‐
+fer and storage at the cost of some processing power. Both keys and batches are dis‐
+cussed in more detail in Chapter 3.
+Schemas
+While messages are opaque byte arrays to Kafka itself, it is recommended that addi‐
+tional structure, or schema, be imposed on the message content so that it can be easily
+understood. There are many options available for message schema, depending on
+your application’s individual needs. Simplistic systems, such as JavaScript Object
+Notation (JSON) and Extensible Markup Language (XML), are easy to use and
+human readable. However, they lack features such as robust type handling and com‐
+patibility between schema versions. Many Kafka developers favor the use of Apache
+Avro, which is a serialization framework originally developed for Hadoop. Avro pro‐
+vides a compact serialization format, schemas that are separate from the message pay‐
+loads and that do not require code to be generated when they change, and strong data
+typing and schema evolution, with both backward and forward compatibility.
+A consistent data format is important in Kafka, as it allows writing and reading mes‐
+sages to be decoupled. When these tasks are tightly coupled, applications that sub‐
+scribe to messages must be updated to handle the new data format, in parallel with
+the old format. Only then can the applications that publish the messages be updated
+to utilize the new format. By using well-defined schemas and storing them in a com‐
+mon repository, the messages in Kafka can be understood without coordination.
+Schemas and serialization are covered in more detail in Chapter 3.
+Topics and Partitions
+Messages in Kafka are categorized into topics. The closest analogies for a topic are a
+database table or a folder in a filesystem. Topics are additionally broken down into a
+number of partitions. Going back to the “commit log” description, a partition is a sin‐
+gle log. Messages are written to it in an append-only fashion and are read in order
+from beginning to end. Note that as a topic typically has multiple partitions, there is
+no guarantee of message ordering across the entire topic, just within a single
+Enter Kafka | 5
+
+=== PAGE 35 ===
+partition. Figure 1-5 shows a topic with four partitions, with writes being appended
+to the end of each one. Partitions are also the way that Kafka provides redundancy
+and scalability. Each partition can be hosted on a different server, which means that a
+single topic can be scaled horizontally across multiple servers to provide performance
+far beyond the ability of a single server. Additionally, partitions can be replicated,
+such that different servers will store a copy of the same partition in case one server
+fails.
+Figure 1-5. Representation of a topic with multiple partitions
+The term stream is often used when discussing data within systems like Kafka. Most
+often, a stream is considered to be a single topic of data, regardless of the number of

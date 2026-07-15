@@ -1,0 +1,200 @@
+similar to how consumer groups handle the failure of one of the consumers in the
+group by assigning partitions to one of the remaining consumers.  Kafka Streams
+benefited from improvements in Kafka’s consumer group coordination protocol, such
+as static group membership and cooperative rebalancing (described in Chapter 4), as
+well as improvements to Kafka’s exactly-once semantics (described in Chapter 8).
+While the high-availability methods described here work well in theory, reality intro‐
+duces some complexity. One important concern is the speed of recovery. When a
+thread has to start processing a task that used to run on a failed thread, it first needs
+to recover its saved state—the current aggregation windows, for instance. Often this
+is done by rereading internal topics from Kafka in order to warm up Kafka Streams
+state stores. During the time it takes to recover the state of a failed task, the stream
+processing job will not make progress on that subset of its data, leading to reduced
+availability and stale data.
+Kafka Streams: Architecture Overview | 415
+
+=== PAGE 445 ===
+Therefore, reducing recovery time often boils down to reducing the time it takes to
+recover the state. A key technique is to make sure all Kafka Streams topics are config‐
+ured for aggressive compaction—by setting a low min.compaction.lag.ms and con‐
+figuring the segment size to 100 MB instead of the default 1 GB (recall that the last
+segment in each partition, the active segment, is not compacted).
+For an even faster recovery, we recommend configuring standby replica—those are
+tasks that simply shadow active tasks in a stream processing application and keep the
+current state warm on a different server. When failover occurs, they already have the
+most current state and are ready to continue processing with almost no downtime.
+More information on both scalability and high availability in Kafka Streams is avail‐
+able in a a blog post and a Kafka summit talk on the topic.
+Stream Processing Use Cases
+Throughout this chapter we’ve learned how to do stream processing—from general
+concepts and patterns to specific examples in Kafka Streams. At this point it may be
+worth looking at the common stream processing use cases. As explained in the begin‐
+ning of the chapter, stream processing—or continuous processing—is useful in cases
+where we want our events to be processed in quick order rather than wait for hours
+until the next batch, but also where we are not expecting a response to arrive in milli‐
+seconds. This is all true but also very abstract. Let’s look at a few real scenarios that
+can be solved with stream processing:
+Customer service
+Suppose that we just reserved a room at a large hotel chain, and we expect an
+email confirmation and receipt. A few minutes after reserving, when the confir‐
+mation still hasn’t arrived, we call customer service to confirm our reservation.
+Suppose the customer service desk tells us, “I don’t see the order in our system,
+but the batch job that loads the data from the reservation system to the hotels
+and the customer service desk only runs once a day, so please call back tomorrow.
+Y ou should see the email within 2–3 business days. ” This doesn’t sound like very
+good service, yet we’ve had this conversation more than once with a large hotel
+chain. What we really want is for every system in the hotel chain to get an update
+about a new reservation seconds or minutes after the reservation is made, includ‐
+ing the customer service center, the hotel, the system that sends email confirma‐
+tions, the website, etc. We also want the customer service center to be able to
+immediately pull up all the details about any of our past visits to any of the hotels
+in the chain, and the reception desk at the hotel to know that we are a loyal cus‐
+tomer so they can give us an upgrade. Building all those systems using stream
+processing applications allows them to receive and process updates in near real
+time, which makes for a better customer experience. With such a system, the
+customer would receive a confirmation email within minutes, their credit card
+416 | Chapter 14: Stream Processing
+
+=== PAGE 446 ===
+would be charged on time, the receipt would be sent, and the service desk could
+immediately answer their questions regarding the reservation.
+Internet of Things
+IoT can mean many things—from a home device for adjusting temperature and
+ordering refills of laundry detergent, to real-time quality control of pharmaceuti‐
+cal manufacturing. A very common use case when applying stream processing to
+sensors and devices is to try to predict when preventive maintenance is needed.
+This is similar to application monitoring but applied to hardware and is common
+in many industries, including manufacturing, telecommunications (identifying
+faulty cellphone towers), cable TV (identifying faulty box-top devices before
+users complain), and many more. Every case has its own pattern, but the goal is
+similar: process events arriving from devices at a large scale and identify patterns
+that signal that a device requires maintenance. These patterns can be dropped
+packets for a switch, more force required to tighten screws in manufacturing, or
+users restarting the box more frequently for cable TV .
+Fraud detection
+Also known as anomaly detection, this is a very wide field that focuses on catch‐
+ing “cheaters” or bad actors in the system. Examples of fraud-detection applica‐
+tions include detecting credit card fraud, stock trading fraud, video-game
+cheaters, and cybersecurity risks. In all these fields, there are large benefits to
+catching fraud as early as possible, so a near real-time system that is capable of
+responding to events quickly—perhaps stopping a bad transaction before it is
+even approved—is much preferred to a batch job that detects fraud three days
+after the fact, when cleanup is much more complicated. This is, again, a problem
+of identifying patterns in a large-scale stream of events.
+In cybersecurity, there is a method known as beaconing. When the hacker plants
+malware inside the organization, it will occasionally reach outside to receive
+commands. It can be difficult to detect this activity since it can happen at any
+time and any frequency. Typically, networks are well defended against external
+attacks but more vulnerable to someone inside the organization reaching out. By
+processing the large stream of network connection events and recognizing a
+pattern of communication as abnormal (for example, detecting that this host typ‐
+ically doesn’t access those specific IPs), the security organization can be alerted
+early, before more harm is done.
+How to Choose a Stream Processing Framework
+When choosing a stream processing framework, it is important to consider the type
+of application you are planning on writing. Different types of applications call for dif‐
+ferent stream processing solutions:
+How to Choose a Stream Processing Framework | 417
+
+=== PAGE 447 ===
+Ingest
+Where the goal is to get data from one system to another, with some modifica‐
+tion to the data to conform to the target system.
+Low milliseconds actions
+Any application that requires almost immediate response. Some fraud-detection
+use cases fall within this bucket.
+Asynchronous microservices
+These microservices perform a simple action on behalf of a larger business pro‐
+cess, such as updating the inventory of a store. These applications may need to
+maintain local state caching events as a way to improve performance.
+Near real-time data analytics
+These streaming applications perform complex aggregations and joins in order to
+slice and dice the data and generate interesting, business-relevant insights.
+The stream processing system you will choose will depend a lot on the problem you
+are solving:
+• If you are trying to solve an ingest problem, you should reconsider whether you
+want a stream processing system or a simpler ingest-focused system like Kafka
+Connect. If you are sure you want a stream processing system, you need to make
+sure it has both a good selection of connectors and high-quality connectors for
+the systems you are targeting.
+• If you are trying to solve a problem that requires low milliseconds actions, you
+should also reconsider your choice of streams. Request-response patterns are
+often better suited to this task. If you are sure you want a stream processing sys‐
+tem, then you need to opt for one that supports an event-by-event low-latency
+model rather than one that focuses on microbatches.
+• If you are building asynchronous microservices, you need a stream processing
+system that integrates well with your message bus of choice (Kafka, hopefully),
+has change capture capabilities that easily deliver upstream changes to the
+microservice local state, and has the good support of a local store that can serve
+as a cache or materialized view of the microservice data.
+• If you are building a complex analytics engine, you also need a stream processing
+system with great support for a local store—this time, not for maintenance of
+local caches and materialized views but rather to support advanced aggregations,
+windows, and joins that are otherwise difficult to implement. The APIs should
+include support for custom aggregations, window operations, and multiple join
+types.
+418 | Chapter 14: Stream Processing
+
+=== PAGE 448 ===
+In addition to use case–specific considerations, there are a few global considerations
+you should take into account:
+Operability of the system
+Is it easy to deploy to production? Is it easy to monitor and troubleshoot? Is it
+easy to scale up and down when needed? Does it integrate well with your existing
+infrastructure? What if there is a mistake and you need to reprocess data?
+Usability of APIs and ease of debugging
+I’ve seen orders-of-magnitude differences in the time it takes to write a high-
+quality application among different versions of the same framework. Develop‐
+ment time and time-to-market are important, so you need to choose a system
+that makes you efficient.
+Makes hard things easy
+Almost every system will claim they can do advanced windowed aggregations
+and maintain local stores, but the question is: do they make it easy for you? Do
+they handle gritty details around scale and recovery, or do they supply leaky
+abstractions and make you handle most of the mess? The more a system exposes
+clean APIs and abstractions and handles the gritty details on its own, the more
+productive developers will be.
+Community
+Most stream processing applications you consider are going to be open source,
+and there’s no replacement for a vibrant and active community. Good commu‐
+nity means you get new and exciting features on a regular basis, the quality is rel‐
+atively good (no one wants to work on bad software), bugs get fixed quickly, and
+user questions get answers in a timely manner. It also means that if you get a
+strange error and Google it, you will find information about it because other peo‐
+ple are using this system and seeing the same issues.
+Summary
+We started the chapter by explaining stream processing. We gave a formal definition
+and discussed the common attributes of the stream processing paradigm. We also
+compared it to other programming paradigms.
+We then discussed important stream processing concepts. Those concepts were
+demonstrated with three example applications written with Kafka Streams.
+After going over all the details of these example applications, we gave an overview of
+the Kafka Streams architecture and explained how it works under the covers. We
+conclude the chapter, and the book, with several examples of stream processing use
+cases and advice on how to compare different stream processing frameworks.
+Summary | 419
+
+=== PAGE 450 ===
+APPENDIX A
+Installing Kafka on Other
+Operating Systems
+Apache Kafka is primarily a Java application and therefore should be able to run on
+any system where you are able to install a JRE. It has, however, been optimized for
+Linux-based operating systems, so that is where it will perform best. Running on
+other operating systems may result in bugs specific to the OS. For this reason, when
+using Kafka for development or test purposes on a common desktop OS, it is a good
+idea to consider running in a virtual machine that matches your eventual production
+environment.
+Installing on Windows
+As of Microsoft Windows 10, there are now two ways that you can run Kafka. The
+traditional way is using a native Java installation. Windows 10 users also have the
+option to use the Windows Subsystem for Linux. The latter method is highly prefer‐
+red because it provides a much simpler setup that more closely matches the typical
+production environment, so we will review it first.
+Using Windows Subsystem for Linux
+If you are running Windows 10, you can install native Ubuntu support under Win‐
+dows using Windows Subsystem for Linux (WSL). At the time of publication, Micro‐
+soft still considers WSL to be an experimental feature. Though it acts similar to a
+virtual machine, it does not require the resources of a full VM and provides richer
+integration with the Windows OS.
+421

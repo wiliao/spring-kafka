@@ -1,0 +1,200 @@
+data.
+So where did Kafka come from? Why did we build it? And what exactly is it?
+Kafka got its start as an internal infrastructure system we built at LinkedIn. Our
+observation was really simple: there were lots of databases and other systems built to
+store data, but what was missing in our architecture was something that would help
+us to handle the continuous flow of data. Prior to building Kafka, we experimented
+with all kinds of off-the-shelf options, from messaging systems to log aggregation and
+ETL tools, but none of them gave us what we wanted.
+We eventually decided to build something from scratch. Our idea was that instead of
+focusing on holding piles of data like our relational databases, key-value stores, search
+indexes, or caches, we would focus on treating data as a continually evolving and
+ever-growing stream and build a data system—and indeed a data architecture—ori‐
+ented around that idea.
+This idea turned out to be even more broadly applicable than we expected. Though
+Kafka got its start powering real-time applications and data flow behind the scenes of
+a social network, you can now see it at the heart of next-generation architectures in
+every industry imaginable. Big retailers are reworking their fundamental business
+processes around continuous data streams, car companies are collecting and process‐
+ing real-time data streams from internet-connected cars, and banks are rethinking
+their fundamental processes and systems around Kafka as well.
+So what is this Kafka thing all about? How does it compare to the systems you already
+know and use?
+xv
+
+=== PAGE 21 ===
+We’ve come to think of Kafka as a streaming platform: a system that lets you publish
+and subscribe to streams of data, store them, and process them, and that is exactly
+what Apache Kafka is built to be. Getting used to this way of thinking about data
+might be a little different than what you’re used to, but it turns out to be an incredibly
+powerful abstraction for building applications and architectures. Kafka is often com‐
+pared to a couple of existing technology categories: enterprise messaging systems, big
+data systems like Hadoop, and data integration or ETL tools. Each of these compari‐
+sons has some validity but also falls a little short.
+Kafka is like a messaging system in that it lets you publish and subscribe to streams of
+messages. In this way, it is similar to products like ActiveMQ, RabbitMQ, IBM’s
+MQSeries, and other products. But even with these similarities, Kafka has a number
+of core differences from traditional messaging systems that make it another kind of
+animal entirely. Here are the big three differences: first, it works as a modern dis‐
+tributed system that runs as a cluster and can scale to handle all the applications in
+even the most massive of companies. Rather than running dozens of individual mes‐
+saging brokers, hand wired to different apps, this lets you have a central platform that
+can scale elastically to handle all the streams of data in a company. Second, Kafka is a
+true storage system built to store data for as long as you might like. This has huge
+advantages in using it as a connecting layer as it provides real delivery guarantees—its
+data is replicated, persistent, and can be kept around as long as you like. Finally, the
+world of stream processing raises the level of abstraction quite significantly. Messag‐
+ing systems mostly just hand out messages. The stream processing capabilities in
+Kafka let you compute derived streams and datasets dynamically off of your streams
+with far less code. These differences make Kafka enough of its own thing that it
+doesn’t really make sense to think of it as “yet another queue. ”
+Another view on Kafka—and one of our motivating lenses in designing and building
+it—was to think of it as a kind of real-time version of Hadoop. Hadoop lets you store
+and periodically process file data at a very large scale. Kafka lets you store and contin‐
+uously process streams of data, also at a large scale. At a technical level, there are defi‐
+nitely similarities, and many people see the emerging area of stream processing as a
+superset of the kind of batch processing people have done with Hadoop and its vari‐
+ous processing layers. What this comparison misses is that the use cases that continu‐
+ous, low-latency processing opens up are quite different from those that naturally fall
+on a batch processing system. Whereas Hadoop and big data targeted analytics appli‐
+cations, often in the data warehousing space, the low-latency nature of Kafka makes it
+applicable for the kind of core applications that directly power a business. This makes
+sense: events in a business are happening all the time, and the ability to react to them
+as they occur makes it much easier to build services that directly power the operation
+of the business, feed back into customer experiences, and so on.
+xvi | Foreword to the First Edition
+
+=== PAGE 22 ===
+The final area Kafka gets compared to is ETL or data integration tools. After all, these
+tools move data around, and Kafka moves data around. There is some validity to this
+as well, but I think the core difference is that Kafka has inverted the problem. Rather
+than a tool for scraping data out of one system and inserting it into another, Kafka is
+a platform oriented around real-time streams of events. This means that not only can
+it connect off-the-shelf applications and data systems, it can also power custom appli‐
+cations built to trigger off of these same data streams. We think this architecture cen‐
+tered around streams of events is a really important thing. In some ways these flows
+of data are the most central aspect of a modern digital company, as important as the
+cash flows you’ d see in a financial statement.
+The ability to combine these three areas—to bring all the streams of data together
+across all the use cases—is what makes the idea of a streaming platform so appealing
+to people.
+Still, all of this is a bit different, and learning how to think and build applications ori‐
+ented around continuous streams of data is quite a mindshift if you are coming from
+the world of request/response-style applications and relational databases. This book is
+absolutely the best way to learn about Kafka, from internals to APIs, written by some
+of the people who know it best. I hope you enjoy reading it as much as I have!
+— Jay Kreps
+Cofounder and CEO at Confluent
+Foreword to the First Edition | xvii
+
+=== PAGE 24 ===
+Preface
+The greatest compliment you can give an author of a technical book is “This is the
+book I wish I had when I got started with this subject. ” This is the goal we set for our‐
+selves when we started writing this book. We looked back at our experience writing
+Kafka, running Kafka in production, and helping many companies use Kafka to build
+software architectures and manage their data pipelines, and we asked ourselves,
+“What are the most useful things we can share with new users to take them from
+beginner to expert?” This book is a reflection of the work we do every day: run
+Apache Kafka and help others use it in the best ways.
+We included what we believe you need to know in order to successfully run Apache
+Kafka in production and build robust and performant applications on top of it. We
+highlighted the popular use cases: message buses for event-driven microservices,
+stream-processing applications, and large-scale data pipelines. We also focused on
+making the book general and comprehensive enough so it will be useful to anyone
+using Kafka, no matter the use case or architecture. We cover practical matters such
+as how to install and configure Kafka and how to use the Kafka APIs, and we also
+dedicate space to Kafka’s design principles and reliability guarantees, and explore sev‐
+eral of Kafka’s delightful architecture details: the replication protocol, controller, and
+storage layer. We believe that knowledge of Kafka’s design and internals is not only a
+fun read for those interested in distributed systems but is also incredibly useful for
+those who are seeking to make informed decisions when they deploy Kafka in pro‐
+duction and design applications that use Kafka. The better you understand how
+Kafka works, the more you can make informed decisions regarding the many trade-
+offs that are involved in engineering.
+One of the problems in software engineering is that there is always more than one
+way to do anything. Platforms such as Apache Kafka provide plenty of flexibility,
+which is great for experts but makes for a steep learning curve for beginners. Very
+often, Apache Kafka tells you how to use a feature but not why you should or
+shouldn’t use it. Whenever possible, we try to clarify the existing choices, the
+xix
+
+=== PAGE 25 ===
+tradeoffs involved, and when you should and shouldn’t use the different options pre‐
+sented by Apache Kafka.
+Who Should Read This Book
+Kafka: The Definitive Guide was written for software engineers who develop applica‐
+tions that use Kafka’s APIs, and for production engineers (also called SREs, DevOps,
+or sysadmins) who install, configure, tune, and monitor Kafka in production. We also
+wrote the book with data architects and data engineers in mind—those responsible
+for designing and building an organization’s entire data infrastructure. Some of the
+chapters, especially Chapters 3, 4, and 14, are geared toward Java developers. Those
+chapters assume that the reader is familiar with the basics of the Java programming
+language, including topics such as exception handling and concurrency. Other chap‐
+ters, especially Chapters 2, 10, 12, and 13, assume the reader has some experience
+running Linux and some familiarity with storage and network configuration in
+Linux. The rest of the book discusses Kafka and software architectures in more gen‐
+eral terms and does not assume special knowledge.
+Another category of people who may find this book interesting are the managers and
+architects who don’t work directly with Kafka but work with the people who do. It is
+just as important that they understand the guarantees that Kafka provides and the
+trade-offs that their employees and coworkers will need to make while building
+Kafka-based systems. The book can provide ammunition to managers who would
+like to get their staff trained in Apache Kafka or ensure that their teams know what
+they need to know.
+Conventions Used in This Book
+The following typographical conventions are used in this book:
+Italic
+Indicates new terms, URLs, email addresses, filenames, and file extensions.
+Constant width
+Used for program listings, as well as within paragraphs to refer to program ele‐
+ments such as variable or function names, databases, data types, environment
+variables, statements, and keywords.
+Constant width bold
+Shows commands or other text that should be typed literally by the user.
+Constant width italic
+Shows text that should be replaced with user-supplied values or by values deter‐
+mined by context.
+xx | Preface
+
+=== PAGE 26 ===
+This element signifies a tip or suggestion.
+This element signifies a general note.
+This element indicates a warning or caution.
+Using Code Examples
+If you have a technical question or a problem using the code examples, please send
+email to bookquestions@oreilly.com.
+This book is here to help you get your job done. In general, if example code is offered
+with this book, you may use it in your programs and documentation. Y ou do not
+need to contact us for permission unless you’re reproducing a significant portion of
+the code. For example, writing a program that uses several chunks of code from this
+book does not require permission. Selling or distributing examples from O’Reilly
+books does require permission. Answering a question by citing this book and quoting
+example code does not require permission. Incorporating a significant amount of
+example code from this book into your product’s documentation does require
+permission.
+We appreciate, but do not require, attribution. An attribution usually includes the
+title, author, publisher, and ISBN. For example: “Kafka: The Definitive Guide by Gwen
+Shapira, Todd Palino, Rajini Sivaram, and Krit Petty (O’Reilly). Copyright 2021 Chen
+Shapira, Todd Palino, Rajini Sivaram, and Krit Petty, 978-1-491-93616-0. ”
+If you feel your use of code examples falls outside fair use or the permission given
+above, feel free to contact us at permissions@oreilly.com.
+Preface | xxi
+
+=== PAGE 27 ===
+O’Reilly Online Learning
+For more than 40 years, O’Reilly Media has provided technol‐
+ogy and business training, knowledge, and insight to help
+companies succeed.
+Our unique network of experts and innovators share their knowledge and expertise
+through books, articles, and our online learning platform. O’Reilly’s online learning
+platform gives you on-demand access to live training courses, in-depth learning
+paths, interactive coding environments, and a vast collection of text and video from
+O’Reilly and 200+ other publishers. For more information, visit http://oreilly.com.
+How to Contact Us
+Please address comments and questions concerning this book to the publisher:
+O’Reilly Media, Inc.
+1005 Gravenstein Highway North
+Sebastopol, CA 95472
+800-998-9938 (in the United States or Canada)
+707-829-0515 (international or local)

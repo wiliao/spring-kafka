@@ -1,0 +1,200 @@
+that has left it running but not functional. Moving the controller in these situations
+does not normally have a high risk, but as it is not a normal task, it should not be
+performed regularly.
+To forcibly move a controller, deleting the ZooKeeper znode at /admin/controller
+manually will cause the current controller to resign, and the cluster will randomly
+select a new controller. There is currently no way to specify a specific broker to be
+controller in Apache Kafka.
+Removing Topics to Be Deleted
+When attempting to delete a topic in Kafka, a ZooKeeper node requests that the dele‐
+tion is created. Once every replica completes deletion of the topic and acknowledges
+deletion is complete, the znode will be removed. Under normal circumstances, this is
+executed by the cluster very quickly. However, sometimes things can go wrong with
+this process. Here are some scenarios in which a deletion request may become stuck:
+1. A requester has no way of knowing whether topic deletion is enabled in the clus‐
+ter and can request deletion of a topic from a cluster in which deletion is
+disabled.
+2. A very large topic is requested to be deleted, but before the request is handled,
+one or more of the replica sets goes offline due to hardware failures, and the dele‐
+tion cannot complete as the controller cannot ack that the deletion was comple‐
+ted successfully.
+To “unstick” topic deletion, first delete the /admin/delete_topic/<topic> znode. Delet‐
+ing the topic ZooKeeper nodes (but not the parent /admin/delete_topic node) will
+remove the pending requests. If the deletion is re-queued by cached requests in the
+controller, it may be necessary to also forcibly move the controller as shown earlier
+immediately after removing the topic znode to ensure that no cached requests are
+pending in the controller.
+Deleting Topics Manually
+If you are running a cluster with delete topics disabled, or if you find yourself needing
+to delete some topics outside of the normal flow of operations, it is possible to man‐
+ually delete them from the cluster. This requires a full shutdown of all brokers in the
+336 | Chapter 12: Administering Kafka
+
+=== PAGE 366 ===
+cluster, however, and cannot be done while any of the brokers in the cluster are
+running.
+Shut Down Brokers First
+Modifying the cluster metadata in ZooKeeper when the cluster is
+online is a very dangerous operation and can put the cluster into an
+unstable state. Never attempt to delete or modify topic metadata in
+ZooKeeper while the cluster is online.
+To delete a topic from the cluster:
+1. Shut down all brokers in the cluster.
+2. Remove the ZooKeeper path /brokers/topics/<topic> from the Kafka cluster path.
+Note that this node has child nodes that must be deleted first.
+3. Remove the partition directories from the log directories on each broker. These
+will be named <topic>-<int>, where <int> is the partition ID.
+4. Restart all brokers.
+Summary
+Running a Kafka cluster can be a daunting endeavor, with numerous configurations
+and maintenance tasks to keep the systems running at peak performance. In this
+chapter, we discussed many of the routine tasks, such as managing topic and client
+configurations, that you will need to handle frequently. We also covered some of the
+more esoteric tasks that you’ll need for debugging problems, like examining log seg‐
+ments. Finally, we covered a few of the operations that, while not safe or routine, can
+be used to get you out of a sticky situation. All together, these tools will help you to
+manage your Kafka cluster. As you begin to scale your Kafka clusters larger, even the
+use of these tools may become arduous and difficult to manage. It is highly recom‐
+mended to engage with the open source Kafka community and take advantage of the
+many other open source projects in the ecosystem to help automate many of the tasks
+outlined in this chapter.
+Now that we are confident in the tools needed to administer and manage our cluster,
+it is still impossible without proper monitoring in place. Chapter 13 will discuss ways
+to monitor broker and cluster health and operations so you can be sure Kafka is
+working well (and know when it isn’t). We will also offer best practices for monitor‐
+ing your clients, including both producers and consumers.
+Summary | 337
+
+=== PAGE 368 ===
+CHAPTER 13
+Monitoring Kafka
+The Apache Kafka applications have numerous measurements for their operation—
+so many, in fact, that it can easily become confusing as to what is important to watch
+and what can be set aside. These range from simple metrics about the overall rate of
+traffic, to detailed timing metrics for every request type, to per-topic and per-
+partition metrics. They provide a detailed view into every operation in the broker, but
+they can also make you the bane of whoever is responsible for managing your moni‐
+toring system.
+This chapter will detail the most critical metrics to monitor all the time and how to
+respond to them. We’ll also describe some of the more important metrics to have on
+hand when debugging problems. This is not an exhaustive list of the metrics that are
+available, however, because the list changes frequently, and many will only be infor‐
+mative to a hard-core Kafka developer.
+Metric Basics
+Before getting into the specific metrics provided by the Kafka broker  and clients, let’s
+discuss the basics of how to monitor Java applications and some best practices around
+monitoring and alerting. This will provide a basis for understanding how to monitor
+the applications and why the specific metrics described later in this chapter have been
+chosen as the most important.
+Where Are the Metrics?
+All of the metrics exposed by Kafka can be accessed via the Java Management Exten‐
+sions (JMX) interface. The easiest way to use them in an external monitoring system
+is to use a collection agent provided by your monitoring system and attach it to the
+Kafka process. This may be a separate process that runs on the system and connects
+339
+
+=== PAGE 369 ===
+to the JMX interface, such as with the Nagios XI check_jmx plug-in or jmxtrans. Y ou
+can also utilize a JMX agent that runs directly in the Kafka process to access metrics
+via an HTTP connection, such as Jolokia or MX4J.
+An in-depth discussion of how to set up monitoring agents is outside the scope of
+this chapter, and there are far too many choices to do justice to all of them. If your
+organization does not currently have experience with monitoring Java applications, it
+may be worthwhile to instead consider monitoring as a service. There are many com‐
+panies that offer monitoring agents, metrics collection points, storage, graphing, and
+alerting in a services package. They can assist you further with setting up the moni‐
+toring agents required.
+Finding the JMX Port
+To aid with configuring applications that connect to JMX on the
+Kafka broker directly, such as monitoring systems, the broker sets
+the configured JMX port in the broker information that is stored in
+ZooKeeper. The /brokers/ids/<ID> znode contains JSON-
+formatted data for the broker, including hostname and jmx_port
+keys. However, it should be noted that remote JMX is disabled by
+default in Kafka for security reasons. If you are going to enable it,
+you must properly configure security for the port. This is because
+JMX not only allows a view into the state of the application, it also
+allows code execution. It is highly recommended that you use a
+JMX metrics agent that is loaded into the application.
+Nonapplication metrics
+Not all metrics will come from Kafka itself. There are five general groupings of where
+you can get your metrics from. Table 13-1 describes the categories when we are moni‐
+toring the Kafka brokers.
+Table 13-1. Metric sources
+Category Description
+Application
+metrics
+These are the metrics you get from Kafka itself, from the JMX interface.
+Logs Another type of monitoring data that comes from Kafka itself. Because it is some form of text or
+structured data, and not just a number, it requires a little more processing.
+Infrastructure
+metrics
+These metrics come from systems that you have in front of Kafka but are still within the request path and
+under your control. An example is a load balancer.
+Synthetic clients This is data from tools that are external to your Kafka deployment, just like a client, but are under your
+direct control and are typically not performing the same work as your clients. An external monitor like
+Kafka Monitor falls in this category.
+Client metrics These are metrics that are exposed by the Kafka clients that connect to your cluster.
+340 | Chapter 13: Monitoring Kafka
+
+=== PAGE 370 ===
+Logs generated by Kafka are discussed later in this chapter, as are client metrics. We
+will also touch very briefly on synthetic metrics. Infrastructure metrics, however, are
+dependent on your specific environment and are outside the scope of the discussion
+here. The further along in your Kafka journey you are, the more important these met‐
+ric sources will be to fully understanding how your applications are running, as the
+lower in the list, the more objective a view of Kafka they provide. For example, rely‐
+ing on metrics from your brokers will suffice at the start, but later on you will want a
+more objective view of how they are performing. A familiar example for the value of
+objective measurements is monitoring the health of a website. The web server is run‐
+ning properly, and all of the metrics it is reporting say that it is working. However,
+there is a problem with the network between your web server and your external
+users, which means that none of your users can reach the web server. A synthetic cli‐
+ent that is running outside your network and checks the accessibility of the website
+would detect this and alert you to the situation.
+What Metrics Do I Need?
+The specific metrics that are important to you is a question that is nearly as loaded as
+what the best editor to use is. It will depend significantly on what you intend to do
+with them, what tools you have available for collecting data, how far along in using
+Kafka you are, and how much time you have available to spend on building infra‐
+structure around Kafka. A broker internals developer will have far different needs
+than a site reliability engineer who is running a Kafka deployment.
+Alerting or debugging?
+The first question you should ask yourself is whether or not your primary goal is to
+alert you when there is a problem with Kafka, or to debug problems that happen.  The
+answer will usually involve a little of both, but knowing whether a metric is for one or
+the other will allow you to treat it differently once it is collected.
+A metric that is destined for alerting is useful for a very short period of time—typi‐
+cally, not much longer than the amount of time it takes to respond to a problem. Y ou
+can measure this on the order of hours, or maybe days. These metrics will be con‐
+sumed by automation that responds to known problems for you, as well as the human
+operators in cases where automation does not exist yet. It is usually important for
+these metrics to be more objective, as a problem that does not impact clients is far less
+critical than one that does.
+Data that is primarily for debugging has a longer time horizon because you are fre‐
+quently diagnosing problems that have existed for some time, or taking a deeper look
+at a more complex problem. This data will need to remain available for days or weeks
+past when it is collected. It is also usually going to be more subjective measurements,
+or data from the Kafka application itself. Keep in mind that it is not always necessary
+Metric Basics | 341
+
+=== PAGE 371 ===
+to collect this data into a monitoring system. If the metrics are used for debugging
+problems in place, it is sufficient that the metrics are available when needed. Y ou do
+not need to overwhelm the monitoring system by collecting tens of thousands of val‐
+ues on an ongoing basis.
+Historical Metrics
+There is a third type of data that you will need eventually, and that
+is historical data on your application. The most common use for
+historical data is for capacity management purposes, and so it
+includes information about resources used, including compute
+resources, storage, and network. These metrics will need to be
+stored for a very long period of time, measured in years. Y ou also
+may need to collect additional metadata to put the metrics into
+context, such as when brokers were added to or removed from the
+cluster.
+Automation or humans?
+Another question to consider is who the consumer of the metrics will be. If the met‐
+rics are consumed by automation, they should be very specific.  It’s OK to have a large
+number of metrics, each describing small details, because this is why computers exist:
+to process a lot of data. The more specific the data is, the easier it is to create automa‐

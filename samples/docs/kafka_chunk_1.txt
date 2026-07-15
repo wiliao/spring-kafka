@@ -1,0 +1,200 @@
+Memory                                                                                                                         34
+Networking                                                                                                                    35
+CPU                                                                                                                                35
+Kafka in the Cloud                                                                                                           35
+Microsoft Azure                                                                                                            36
+Amazon Web Services                                                                                                 36
+Configuring Kafka Clusters                                                                                            36
+How Many Brokers?                                                                                                     37
+Broker Configuration                                                                                                  38
+OS Tuning                                                                                                                      38
+Production Concerns                                                                                                      42
+Garbage Collector Options                                                                                         42
+Datacenter Layout                                                                                                        43
+Colocating Applications on ZooKeeper                                                                    44
+Summary                                                                                                                           46
+3. Kafka Producers: Writing Messages to Kafka. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .  47
+Producer Overview                                                                                                          48
+Constructing a Kafka Producer                                                                                     50
+Sending a Message to Kafka                                                                                           52
+Sending a Message Synchronously                                                                            52
+Sending a Message Asynchronously                                                                          53
+iv | Table of Contents
+
+=== PAGE 10 ===
+Configuring Producers                                                                                                   54
+client.id                                                                                                                          55
+acks                                                                                                                                 55
+Message Delivery Time                                                                                                56
+linger.ms                                                                                                                        59
+buffer.memory                                                                                                              59
+compression.type                                                                                                          59
+batch.size                                                                                                                       59
+max.in.flight.requests.per.connection                                                                       60
+max.request.size                                                                                                            60
+receive.buffer.bytes and send.buffer.bytes                                                                61
+enable.idempotence                                                                                                     61
+Serializers                                                                                                                          61
+Custom Serializers                                                                                                        62
+Serializing Using Apache Avro                                                                                   64
+Using Avro Records with Kafka                                                                                 65
+Partitions                                                                                                                           68
+Headers                                                                                                                              71
+Interceptors                                                                                                                       71
+Quotas and Throttling                                                                                                    73
+Summary                                                                                                                           75
+4. Kafka Consumers: Reading Data from Kafka. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .  77
+Kafka Consumer Concepts                                                                                             77
+Consumers and Consumer Groups                                                                           77
+Consumer Groups and Partition Rebalance                                                            80
+Static Group Membership                                                                                           83
+Creating a Kafka Consumer                                                                                           84
+Subscribing to Topics                                                                                                      85
+The Poll Loop                                                                                                                   86
+Thread Safety                                                                                                                87
+Configuring Consumers                                                                                                 88
+fetch.min.bytes                                                                                                              88
+fetch.max.wait.ms                                                                                                         88
+fetch.max.bytes                                                                                                             89
+max.poll.records                                                                                                           89
+max.partition.fetch.bytes                                                                                             89
+session.timeout.ms and heartbeat.interval.ms                                                         89
+max.poll.interval.ms                                                                                                    90
+default.api.timeout.ms                                                                                                 90
+request.timeout.ms                                                                                                       90
+Table of Contents | v
+
+=== PAGE 11 ===
+auto.offset.reset                                                                                                             91
+enable.auto.commit                                                                                                      91
+partition.assignment.strategy                                                                                     91
+client.id                                                                                                                          93
+client.rack                                                                                                                      93
+group.instance.id                                                                                                          93
+receive.buffer.bytes and send.buffer.bytes                                                                93
+offsets.retention.minutes                                                                                             93
+Commits and Offsets                                                                                                       94
+Automatic Commit                                                                                                      95
+Commit Current Offset                                                                                               96
+Asynchronous Commit                                                                                               97
+Combining Synchronous and Asynchronous Commits                                        99
+Committing a Specified Offset                                                                                 100
+Rebalance Listeners                                                                                                       101
+Consuming Records with Specific Offsets                                                                 104
+But How Do We Exit?                                                                                                   105
+Deserializers                                                                                                                    106
+Custom Deserializers                                                                                                 107
+Using Avro Deserialization with Kafka Consumer                                               109
+Standalone Consumer: Why and How to Use a Consumer Without a Group     110
+Summary                                                                                                                         111
+5. Managing Apache Kafka Programmatically. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .  113
+AdminClient Overview                                                                                                 114
+Asynchronous and Eventually Consistent API                                                      114
+Options                                                                                                                        114
+Flat Hierarchy                                                                                                             115
+Additional Notes                                                                                                        115
+AdminClient Lifecycle: Creating, Configuring, and Closing                                  115
+client.dns.lookup                                                                                                        116
+request.timeout.ms                                                                                                    117
+Essential Topic Management                                                                                        118
+Configuration Management                                                                                         121
+Consumer Group Management                                                                                   123
+Exploring Consumer Groups                                                                                   123
+Modifying Consumer Groups                                                                                  125
+Cluster Metadata                                                                                                            127
+Advanced Admin Operations                                                                                      127
+Adding Partitions to a Topic                                                                                     127
+Deleting Records from a Topic                                                                                 128
+vi | Table of Contents
+
+=== PAGE 12 ===
+Leader Election                                                                                                           128
+Reassigning Replicas                                                                                                  129
+Testing                                                                                                                             131
+Summary                                                                                                                         133
+6. Kafka Internals. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .  135
+Cluster Membership                                                                                                      135
+The Controller                                                                                                                136
+KRaft: Kafka’s New Raft-Based Controller                                                             137
+Replication                                                                                                                      139
+Request Processing                                                                                                        142
+Produce Requests                                                                                                       144
+Fetch Requests                                                                                                            145
+Other Requests                                                                                                           147
+Physical Storage                                                                                                              149
+Tiered Storage                                                                                                             149
+Partition Allocation                                                                                                   151
+File Management                                                                                                        152
+File Format                                                                                                                  153
+Indexes                                                                                                                         155
+Compaction                                                                                                                 156
+How Compaction Works                                                                                          156
+Deleted Events                                                                                                            158
+When Are Topics Compacted?                                                                                 159
+Summary                                                                                                                         159
+7. Reliable Data Delivery. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .  161
+Reliability Guarantees                                                                                                   162
+Replication                                                                                                                      163
+Broker Configuration                                                                                                    164
+Replication Factor                                                                                                      165
+Unclean Leader Election                                                                                           166
+Minimum In-Sync Replicas                                                                                      167
+Keeping Replicas In Sync                                                                                          168
+Persisting to Disk                                                                                                       169
+Using Producers in a Reliable System                                                                         169
+Send Acknowledgments                                                                                            170
+Configuring Producer Retries                                                                                  171
+Additional Error Handling                                                                                       171
+Using Consumers in a Reliable System                                                                      172
+Important Consumer Configuration Properties for Reliable Processing          173
+Table of Contents | vii
+
+=== PAGE 13 ===
+Explicitly Committing Offsets in Consumers                                                        174
+Validating System Reliability                                                                                        176
+Validating Configuration                                                                                          176
+Validating Applications                                                                                             177
+Monitoring Reliability in Production                                                                     178
+Summary                                                                                                                         180
+8. Exactly-Once Semantics. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .  181
+Idempotent Producer                                                                                                    182
+How Does the Idempotent Producer Work?                                                          182
+Limitations of the Idempotent Producer                                                                184
+How Do I Use the Kafka Idempotent Producer?                                                   185
+Transactions                                                                                                                    186
+Transactions Use Cases                                                                                              187
+What Problems Do Transactions Solve?                                                                 187
+How Do Transactions Guarantee Exactly-Once?                                                  188
+What Problems Aren’t Solved by Transactions?                                                    191
+How Do I Use Transactions?                                                                                    193
+Transactional IDs and Fencing                                                                                196
+How Transactions Work                                                                                            198
+Performance of Transactions                                                                                       200
+Summary                                                                                                                         201
+9. Building Data Pipelines. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .  203
+Considerations When Building Data Pipelines                                                         204
+Timeliness                                                                                                                    204
+Reliability                                                                                                                     205
+High and Varying Throughput                                                                                205
+Data Formats                                                                                                               206
+Transformations                                                                                                         207
+Security                                                                                                                        208
+Failure Handling                                                                                                         209
+Coupling and Agility                                                                                                 209
+When to Use Kafka Connect Versus Producer and Consumer                              210
+Kafka Connect                                                                                                                211
+Running Kafka Connect                                                                                            211
+Connector Example: File Source and File Sink                                                      214
+Connector Example: MySQL to Elasticsearch                                                       216
+Single Message Transformations                                                                              223
+A Deeper Look at Kafka Connect                                                                            225
+Alternatives to Kafka Connect                                                                                     229
+viii | Table of Contents
+
+=== PAGE 14 ===
+Ingest Frameworks for Other Datastores                                                               229
+GUI-Based ETL Tools                                                                                                229
+Stream Processing Frameworks                                                                               230
+Summary                                                                                                                         230
+10. Cross-Cluster Data Mirroring. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .  233
+Use Cases of Cross-Cluster Mirroring                                                                        234

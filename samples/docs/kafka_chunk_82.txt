@@ -1,0 +1,200 @@
+providers, Aiven also supports DigitalOcean and UpCloud.
+Title CloudKarafka
+URL https://www.cloudkarafka.com
+Description CloudKarafka focuses on providing a managed Kafka solution with integrations for popular infrastructure
+services (such as DataDog or Splunk). It supports the use of Confluent’s Schema Registry and REST proxy with its
+platform, but only the 5.0 version prior to the license changes by Confluent. CloudKarafka provides its services
+on both AWS and Google Cloud Platform.
+Title Amazon Managed Streaming for Apache Kafka (Amazon MSK)
+URL https://aws.amazon.com/msk
+Description Amazon also provides its own managed Kafka platform, supported only on AWS. Schema support is provided
+through integration with AWS Glue, while a REST proxy is not directly supported. Amazon promotes the use of
+community tools (such as Cruise Control, Burrow, and Confluent’s REST proxy) but does not directly support
+them. As such, MSK is somewhat less integrated than other offers, but can still provide a core Kafka cluster.
+Title Azure HDInsight
+URL https://azure.microsoft.com/en-us/services/hdinsight
+Description Microsoft also provides a managed platform for Kafka in HDInsight, which also supports Hadoop, Spark, and
+other big data components. Similar to MSK, HDInsight focuses on the core Kafka cluster, leaving many of the
+other components (including a schema registry and REST proxy) up to the user to provide. Some third parties
+have provided templates for performing these deployments, but they are not supported by Microsoft.
+Title Cloudera
+URL https://www.cloudera.com/products/open-source/apache-hadoop/apache-kafka.html
+Description Cloudera has been a fixture in the Kafka community since the early days and provides managed Kafka as the
+stream data component of its overall Customer Data Platform (CDP) product. CDP focuses on more than just
+Kafka, however, and it operates in the public cloud environments as well as providing private options.
+428 | Appendix B: Additional Kafka Tools
+
+=== PAGE 458 ===
+Cluster Deployment and Management
+When running Kafka outside of a managed platform, you will need several things to
+assist you with running the cluster properly. This includes help with provisioning and
+deployment, balancing data, and visualizing your clusters.
+Title Strimzi
+URL https://strimzi.io
+Description Strimzi provides Kubernetes operators for deploying Kafka clusters to make it easier to set up Kafka in a
+Kubernetes environment. It does not provide managed services but instead makes it easy for you to get up and
+running in a cloud, whether public or private. It also provides the Strimzi Kafka Bridge, which is a REST proxy
+implementation supported under the Apache 2.0 license. At this time, Strimzi does not have support for a
+schema registry, due to concerns about licenses.
+Title AKHQ
+URL https://akhq.io
+Description AKHQ is a GUI for managing and interacting with Kafka clusters. It supports configuration management,
+including users and ACLs, and provides some support for components like the Schema Registry and Kafka
+Connect as well. It also provides tools for working with data in the cluster as an alternative to the console tools.
+Title JulieOps
+URL https://github.com/kafka-ops/julie
+Description JulieOps (formerly Kafka Topology Builder) provides for automated management of topics and ACLs using a
+GitOps model. More than viewing the state of the current configuration, JulieOps provides a means for
+declarative configuration and change control of topics, schemas, ACLs, and more over time.
+Title Cruise Control
+URL https://github.com/linkedin/cruise-control
+Description Cruise Control is LinkedIn’s answer to how to manage hundreds of clusters with thousands of brokers. This tool
+began as a solution to automated rebalancing of data in clusters but has evolved to include anomaly detection
+and administrative operations, such as adding and removing brokers. For anything more than a testing cluster,
+it is a must-have for any Kafka operator.
+Title Conduktor
+URL https://www.conduktor.io
+Description While not open source, Conduktor is a popular desktop tool for managing and interacting with Kafka clusters. It
+supports many of the managed platforms (including Confluent, Aiven, and MSK) and many different
+components (such as Connect, kSQL, and Streams). It also allows you to interact with data in the clusters, as
+opposed to using the console tools. A free license is provided for development use that works with a single
+cluster.
+Additional Kafka Tools | 429
+
+=== PAGE 459 ===
+Monitoring and Data Exploration
+A critical part to running Kafka is to ensure that your cluster and your clients are
+healthy. Like many applications, Kafka exposes numerous metrics and other teleme‐
+try, but making sense of it can be challenging. Many of the larger monitoring plat‐
+forms (such as Prometheus) can easily fetch metrics from Kafka brokers and clients.
+There are also a number of tools available to assist with making sense of all the data.
+Title Xinfra Monitor
+URL https://github.com/linkedin/kafka-monitor
+Description Xinfra Monitor (formerly Kafka Monitor) was developed by LinkedIn to monitor availability of Kafka clusters and
+brokers. It does this by using a set of topics to generate synthetic data through the cluster and measuring
+latency, availability, and completeness. It’s a valuable tool for measuring your Kafka deployment’s health
+without requiring direct interaction with your clients.
+Title Burrow
+URL https://github.com/linkedin/burrow
+Description Burrow is another tool originally created by LinkedIn, which provides holistic monitoring of consumer lag
+within Kafka clusters. It provides a view into the health of the consumers without needing to directly interact
+with them. Burrow is actively supported by the community and has its own ecosystem of tools  to connect it
+with other components.
+Title Kafka Dashboard
+URL https://www.datadoghq.com/dashboards/kafka-dashboard
+Description For those who use DataDog for monitoring, it provides an excellent Kafka Dashboard to give you a head start on
+integrating Kafka clusters into your monitoring stack. It is designed to provide a single-pane view of your Kafka
+cluster, simplifying the view of many metrics.
+Title Streams Explorer
+URL https://github.com/bakdata/streams-explorer
+Description Streams Explorer is a tool for visualizing the flow of data through applications and connectors in a Kubernetes
+deployment. While it heavily relies on structuring your deployments using either Kafka Streams or Faust
+through bakdata’s tools, it can then provide an easily comprehensible view of those applications and their
+metrics.
+Title kcat
+URL https://github.com/edenhill/kafkacat
+Description Kcat (formerly kafkacat) is a much-loved alternative to the console producer and consumer that are part of the
+core Apache Kafka project. It is small, fast, and written in C, so it does not have JVM overhead. It also supports
+limited views into cluster status by showing metadata output for the cluster.
+430 | Appendix B: Additional Kafka Tools
+
+=== PAGE 460 ===
+Client Libraries
+The Apache Kafka project provides client libraries for Java applications, but one lan‐
+guage is never enough. There are many implementations of the Kafka client out there,
+with popular languages such as Python, Go, and Ruby having several options. In
+addition, REST proxies (such as those from Confluent, Strimzi, or Karapace) can
+cover a variety of use cases. Here are a few client implementations that have stood the
+test of time.
+Title librdkafka
+URL https://github.com/edenhill/librdkafka
+Description librdkafka is a C library implementation of the Kafka client that is regarded as one of the best-performing
+libraries available. So good, in fact, that Confluent supports clients for Go, Python, and .NET that it created as
+wrappers around librdkafka. It is licensed simply under the two-clause BSD license, which makes it easy to use
+in any application.
+Title Sarama
+URL https://github.com/Shopify/sarama
+Description Shopify created the Sarama client as a native Golang implementation. It’s released under the MIT license.
+Title kafka-python
+URL https://github.com/dpkp/kafka-python
+Description kafka-python is another native client implementation, this time in Python. It’s released under the Apache 2.0
+license.
+Stream Processing
+While the Apache Kafka project includes Kafka Streams for building applications, it’s
+not the only choice out there for stream processing of data from Kafka.
+Title Samza
+URL https://samza.apache.org
+Description Apache Samza is a framework for stream processing that was specifically designed for Kafka. While it predates
+Kafka Streams, it was developed by many of the same people, and as a result the two share many concepts.
+However, unlike Kafka Streams, Samza runs on Yarn and provides a full framework for applications to run in.
+Title Spark
+URL https://spark.apache.org
+Description Spark is another Apache project oriented toward batch processing of data. It handles streams by considering
+them to be fast microbatches. This means the latency is a little higher, but fault tolerance is simply handled
+through reprocessing batches, and Lambda architecture is easy. It also has the benefit of wide community
+support.
+Additional Kafka Tools | 431
+
+=== PAGE 461 ===
+Title Flink
+URL https://flink.apache.org
+Description Apache Flink is specifically oriented toward stream processing and operates with very low latency. Like Samza,
+it supports Yarn but also works with Mesos, Kubernetes, or standalone clusters. It also supports Python and R
+with provided high-level APIs.
+Title Beam
+URL https://beam.apache.org
+Description Apache Beam doesn’t provide stream processing directly but instead promotes itself as a unified programming
+model for both batch and stream processing. It utilizes platforms like Samza, Spark, and Flink as runners for
+components in an overall processing pipeline.
+432 | Appendix B: Additional Kafka Tools
+
+=== PAGE 462 ===
+Index
+A
+abortTransaction method, 199
+acceptor threads, 143
+access control, 267
+access control lists (see ACLs)
+ACID reliability guarantee, 162
+acks parameter, 55, 144, 169
+acks=0, 170
+acks=1, 170
+acks=all, 170, 185, 246
+using correct configuration for reliability,
+170
+AclAuthorizer, 292-295
+enabling, 291
+ACLs (access control lists)
+client ACLs, tool for interacting with, 335
+Deny ACLs, 287
+enabled for ZooKeeper authorization, 300
+for ZooKeeper authorization, 301
+group and role ACLs, 296
+managing for resources in large organiza‐
+tions, 297
+for MirrorMaker, 252
+topic, migation with MirrorMaker, 250
+in ZooKeeper, 292
+active controller, 139
+active controller count metric, 354
+active segment, 153
+active-active architecture, 238-240
+replication flow, 251
+active-standby architecture, 240-245
+replication flow config in MirrorMaker, 249
+activity tracking, 12, 14
+Kafka's features for, 15
+ad hoc pipelines, 209
+AddPartitionsToTxnRequest, 199
+admin requests, 143
+AdminClient, 113
+advanced admin operations, 127-130
+adding partitions to a topic, 127
+deleting records from a topic, 128
+leader election, 128
+reassigning replicas, 129
+checking cluster metadata, 127
+consumer group management with
+exploring consumer groups, 123
+modifying consumer groups, 125-126
+deleteRecords method, 158

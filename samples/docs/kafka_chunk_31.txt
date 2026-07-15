@@ -1,0 +1,200 @@
+because latency-sensitive applications perform tail reads and are served from the local
+tier, so they benefit from the existing Kafka mechanism of efficiently using the page
+cache to serve the data. Backfill and other applications recovering from a failure that
+needs data older than what is in the local tier are served from the remote tier.
+The dual-tier architecture used in tiered storage allows scaling storage independent of
+memory and CPUs in a Kafka cluster. This enables Kafka to be a long-term storage
+solution. This also reduces the amount of data stored locally on Kafka brokers, and
+hence the amount of data that needs to be copied during recovery and rebalancing.
+Log segments that are available in the remote tier need not be restored on the broker
+or restored lazily and are served from the remote tier. Since not all data is stored on
+the brokers, increasing the retention period no longer requires scaling the Kafka clus‐
+ter storage and adding new nodes. At the same time, the overall data retention can
+still be much longer, eliminating the need for separate data pipelines to copy the data
+from Kafka to external stores, as done currently in many deployments.
+The design of tiered storage is documented in detail in KIP-405, including a new
+component—the RemoteLogManager and the interactions with existing functionality,
+such as replicas catching up to the leader and leader elections.
+One interesting result that is documented in KIP-405 is the performance implications
+of tiered storage. The team implementing tiered storage measured performance in
+several use cases. The first was using Kafka’s usual high-throughput workload. In that
+case, latency increased a bit (from 21 ms in p99 to 25 ms), since brokers also have to
+ship segments to remote storage. The second use case was when some consumers are
+reading old data. Without tiered storage, consumers reading old data have a large
+impact on latency (21 ms versus 60 ms p99), but with tiered storage enabled, the
+150 | Chapter 6: Kafka Internals
+
+=== PAGE 180 ===
+impact is significantly lower (25 ms versus 42 ms p99); this is because tiered storage
+reads are read from HDFS or S3 via a network path. Network reads do not compete
+with local reads on disk I/O or page cache, and leave the page cache intact with fresh
+data.
+This means that in addition to infinite storage, lower costs, and elasticity, tiered stor‐
+age also delivers isolation between historical reads and real-time reads.
+Partition Allocation
+When you create a topic, Kafka first decides how to allocate the partitions between
+brokers. Suppose you have 6 brokers and you decide to create a topic with 10 parti‐
+tions and a replication factor of 3. Kafka now has 30 partition replicas to allocate to 6
+brokers. When doing the allocations, the goals are:
+• To spread replicas evenly among brokers—in our example, to make sure we allo‐
+cate five replicas per broker.
+• To make sure that for each partition, each replica is on a different broker. If parti‐
+tion 0 has the leader on broker 2, we can place the followers on brokers 3 and 4,
+but not on 2 and not both on 3.
+• If the brokers have rack information (available in Kafka release 0.10.0 and
+higher), then assign the replicas for each partition to different racks if possible.
+This ensures that an event that causes downtime for an entire rack does not cause
+complete unavailability for partitions.
+To do this, we start with a random broker (let’s say 4) and start assigning partitions to
+each broker in a round-robin manner to determine the location for the leaders. So
+partition 0 leader will be on broker 4, partition 1 leader will be on broker 5, partition
+2 will be on broker 0 (because we only have 6 brokers), and so on. Then, for each
+partition, we place the replicas at increasing offsets from the leader. If the leader for
+partition 0 is on broker 4, the first follower will be on broker 5 and the second on
+broker 0. The leader for partition 1 is on broker 5, so the first replica is on broker 0
+and the second on broker 1.
+When rack awareness is taken into account, instead of picking brokers in numerical
+order, we prepare a rack-alternating broker list. Suppose that we know that brokers 0
+and 1 are on the same rack, and brokers 2 and 3 are on a separate rack. Instead of
+picking brokers in the order of 0 to 3, we order them as 0, 2, 1, 3—each broker is
+followed by a broker from a different rack ( Figure 6-5). In this case, if the leader for
+partition 0 is on broker 2, the first replica will be on broker 1, which is on a com‐
+pletely different rack. This is great, because if the first rack goes offline, we know that
+we still have a surviving replica, and therefore the partition is still available. This will
+Physical Storage | 151
+
+=== PAGE 181 ===
+be true for all our replicas, so we have guaranteed availability in the case of rack
+failure.
+Figure 6-5. Partitions and replicas assigned to brokers on different racks
+Once we choose the correct brokers for each partition and replica, it is time to decide
+which directory to use for the new partitions. We do this independently for each par‐
+tition, and the rule is very simple: we count the number of partitions on each direc‐
+tory and add the new partition to the directory with the fewest partitions. This means
+that if you add a new disk, all the new partitions will be created on that disk. This is
+because, until things balance out, the new disk will always have the fewest partitions.
+Mind the Disk Space
+Note that the allocation of partitions to brokers does not take avail‐
+able space or existing load into account, and that allocation of par‐
+titions to disks takes the number of partitions into account but not
+the size of the partitions. This means that if some brokers have
+more disk space than others (perhaps because the cluster is a mix
+of older and newer servers), some partitions are abnormally large,
+or you have disks of different sizes on the same broker, you need to
+be careful with the partition allocation.
+File Management
+Retention is an important concept in Kafka—Kafka does not keep data forever, nor
+does it wait for all consumers to read a message before deleting it. Instead, the Kafka
+administrator configures a retention period for each topic—either the amount of time
+to store messages before deleting them or how much data to store before older mes‐
+sages are purged.
+Because finding the messages that need purging in a large file and then deleting a
+portion of the file is both time-consuming and error prone, we instead split each par‐
+tition into segments. By default, each segment contains either 1 GB of data or a week
+152 | Chapter 6: Kafka Internals
+
+=== PAGE 182 ===
+of data, whichever is smaller. As a Kafka broker is writing to a partition, if the seg‐
+ment limit is reached, it closes the file and starts a new one.
+The segment we are currently writing to is called an active segment. The active seg‐
+ment is never deleted, so if you set log retention to only store a day of data, but each
+segment contains five days of data, you will really keep data for five days because we
+can’t delete the data before the segment is closed. If you choose to store data for a
+week and roll a new segment every day, you will see that every day we will roll a new
+segment while deleting the oldest segment—so most of the time the partition will
+have seven segments.
+As you learned in Chapter 2, a Kafka broker will keep an open file handle to every
+segment in every partition—even inactive segments. This leads to an usually high
+number of open file handles, and the OS must be tuned accordingly.
+File Format
+Each segment is stored in a single data file. Inside the file, we store Kafka messages
+and their offsets. The format of the data on the disk is identical to the format of the
+messages that we send from the producer to the broker and later from the broker to
+the consumers. Using the same message format on disk and over the wire is what
+allows Kafka to use zero-copy optimization when sending messages to consumers,
+and also avoid decompressing and recompressing messages that the producer already
+compressed. As a result, if we decide to change the message format, both the wire
+protocol and the on-disk format need to change, and Kafka brokers need to know
+how to handle cases in which files contain messages of two formats due to upgrades.
+Kafka messages consist of user payload and system headers. User payload includes an
+optional key, a value, and an optional collection of headers, where each header is its
+own key/value pair.
+Starting with version 0.11 (and the v2 message format), Kafka producers always send
+messages in batches. If you send a single message, the batching adds a bit of overhead.
+But with two messages or more per batch, the batching saves space, which reduces
+network and disk usage. This is one of the reasons why Kafka performs better with
+linger.ms=10—the small delay increases the chance that more messages will be sent
+together. Since Kafka creates a separate batch per partition, producers that write to
+fewer partitions will be more efficient as well. Note that Kafka producers can include
+multiple batches in the same produce request. This means that if you are using
+compression on the producer (recommended!), sending larger batches means better
+compression both over the network and on the broker disks.
+Message batch headers include:
+Physical Storage | 153
+
+=== PAGE 183 ===
+• A magic number indicating the current version of the message format (here we’re
+documenting v2).
+• The offset of the first message in the batch and the difference from the offset of
+the last message—those are preserved even if the batch is later compacted and
+some messages are removed. The offset of the first message is set to 0 when the
+producer creates and sends the batch. The broker that first persists this batch (the
+partition leader) replaces this with the real offset.
+• The timestamps of the first message and the highest timestamp in the batch. The
+timestamps can be set by the broker if the timestamp type is set to append time
+rather than create time.
+• Size of the batch, in bytes.
+• The epoch of the leader that received the batch (this is used when truncating
+messages after leader election; KIP-101 and KIP-279 explain the usage in detail).
+• Checksum for validating that the batch is not corrupted.
+• Sixteen bits indicating different attributes: compression type, timestamp type
+(timestamp can be set at the client or at the broker), and whether the batch is part
+of a transaction or is a control batch.
+• Producer ID, producer epoch, and the first sequence in the batch—these are all
+used for exactly-once guarantees.
+• And, of course, the set of messages that are part of the batch.
+As you can see, the batch header includes a lot of information. The records them‐
+selves also have system headers (not to be confused with headers that can be set by
+users). Each record includes:
+• Size of the record, in bytes
+• Attributes—currently there are no record-level attributes, so this isn’t used
+• The difference between the offset of the current record and the first offset in the
+batch
+• The difference, in milliseconds, between the timestamp of this record and the
+first timestamp in the batch
+• The user payload: key, value, and headers
+Note that there is very little overhead to each record, and most of the system infor‐
+mation is at the batch level. Storing the first offset and timestamp of the batch in the
+header and only storing the difference in each record dramatically reduces the over‐
+head of each record, making larger batches more efficient.
+154 | Chapter 6: Kafka Internals
+
+=== PAGE 184 ===
+In addition to message batches that contain user data, Kafka also has control
+batches—indicating transactional commits, for instance. Those are handled by the
+consumer and not passed to the user application, and currently they include a version
+and a type indicator: 0 for an aborted transaction, 1 for a commit.
+If you wish to see all this for yourself, Kafka brokers ship with the DumpLogSegment
+tool, which allows you to look at a partition segment in the filesystem and examine its
+contents. Y ou can run the tool using:
+  bin/kafka-run-class.sh kafka.tools.DumpLogSegments
+If you choose the --deep-iteration parameter, it will show you information about
+messages compressed inside the wrapper messages.
+Message Format Down Conversion
+The message format documented earlier was introduced in version
+0.11. Since Kafka supports upgrading brokers before all the clients
+are upgraded, it had to support any combination of versions
+between the broker, producer, and consumer. Most combinations
+work with no issues—new brokers will understand the old message
+format from producers, and new producers will know to send old
+format messages to old brokers. But there is a challenging situation
+when a new producer sends v2 messages to new brokers: the mes‐
+sage is stored in v2 format, but an old consumer that doesn’t sup‐
+port v2 format tries to read it. In this scenario, the broker will need
+to convert the message from v2 format to v1, so the consumer will
+be able to parse it. This conversion uses far more CPU and mem‐
+ory than normal consumption, so it is best avoided. KIP-188 intro‐
+duced several important health metrics, among them
+FetchMessageConversionsPerSec and MessageConversions
+TimeMs. If your organization is still using old clients, we recom‐
+mend checking the metrics and upgrading the clients as soon as

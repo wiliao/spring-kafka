@@ -1,0 +1,200 @@
+synchronization, and providing group services. This book won’t go into extensive
+detail about ZooKeeper but will limit explanations to only what is needed to operate
+Kafka. While it is possible to run a ZooKeeper server using scripts contained in the
+Kafka distribution, it is trivial to install a full version of ZooKeeper from the
+distribution.
+Figure 2-1. Kafka and ZooKeeper
+Kafka has been tested extensively with the stable 3.5 release of ZooKeeper and is reg‐
+ularly updated to include the latest release. In this book, we will be using ZooKeeper
+3.5.9, which can be downloaded from the ZooKeeper website.
+Standalone server
+ZooKeeper comes with a base example config file that will work well for most use
+cases in /usr/local/zookeeper/config/zoo_sample.cfg. However, we will manually create
+ours with some basic settings for demo purposes in this book. The following example
+installs ZooKeeper with a basic configuration in /usr/local/zookeeper, storing its data
+in /var/lib/zookeeper:
+20 | Chapter 2: Installing Kafka
+
+=== PAGE 50 ===
+# tar -zxf apache-zookeeper-3.5.9-bin.tar.gz
+# mv apache-zookeeper-3.5.9-bin /usr/local/zookeeper
+# mkdir -p /var/lib/zookeeper
+# cp > /usr/local/zookeeper/conf/zoo.cfg << EOF
+> tickTime=2000
+> dataDir=/var/lib/zookeeper
+> clientPort=2181
+> EOF
+# export JAVA_HOME=/usr/java/jdk-11.0.10
+# /usr/local/zookeeper/bin/zkServer.sh start
+JMX enabled by default
+Using config: /usr/local/zookeeper/bin/../conf/zoo.cfg
+Starting zookeeper ... STARTED
+#
+Y ou can now validate that ZooKeeper is running correctly in standalone mode by
+connecting to the client port and sending the four-letter command srvr. This will
+return basic ZooKeeper information from the running server:
+# telnet localhost 2181
+Trying 127.0.0.1...
+Connected to localhost.
+Escape character is '^]'.
+srvr
+Zookeeper version: 3.5.9-83df9301aa5c2a5d284a9940177808c01bc35cef, built on 
+01/06/2021 19:49 GMT
+Latency min/avg/max: 0/0/0
+Received: 1
+Sent: 0
+Connections: 1
+Outstanding: 0
+Zxid: 0x0
+Mode: standalone
+Node count: 5
+Connection closed by foreign host.
+#
+ZooKeeper ensemble
+ZooKeeper is designed to work as a cluster, called an ensemble, to ensure high availa‐
+bility. Due to the balancing algorithm used, it is recommended that ensembles con‐
+tain an odd number of servers (e.g., 3, 5, and so on) as a majority of ensemble
+members (a quorum) must be working in order for ZooKeeper to respond to
+requests. This means that in a three-node ensemble, you can run with one node miss‐
+ing. With a five-node ensemble, you can run with two nodes missing.
+Environment Setup | 21
+
+=== PAGE 51 ===
+Sizing Your ZooKeeper Ensemble
+Consider running ZooKeeper in a five-node ensemble. To make
+configuration changes to the ensemble, including swapping a node,
+you will need to reload nodes one at a time. If your ensemble can‐
+not tolerate more than one node being down, doing maintenance
+work introduces additional risk. It is also not recommended to run
+more than seven nodes, as performance can start to degrade due to
+the nature of the consensus protocol.
+Additionally, if you feel that five or seven nodes aren’t supporting
+the load due to too many client connections, consider adding addi‐
+tional observer nodes for help in balancing read-only traffic.
+To configure ZooKeeper servers in an ensemble, they must have a common configu‐
+ration that lists all servers, and each server needs a myid file in the data directory that
+specifies the ID number of the server. If the hostnames of the servers in the ensemble
+are zoo1.example.com, zoo2.example.com, and zoo3.example.com, the configura‐
+tion file might look like this:
+tickTime=2000
+dataDir=/var/lib/zookeeper
+clientPort=2181
+initLimit=20
+syncLimit=5
+server.1=zoo1.example.com:2888:3888
+server.2=zoo2.example.com:2888:3888
+server.3=zoo3.example.com:2888:3888
+In this configuration, the initLimit is the amount of time to allow followers to con‐
+nect with a leader. The syncLimit value limits how long out-of-sync followers can be
+with the leader. Both values are a number of tickTime units, which makes the init
+Limit 20 × 2,000 ms, or 40 seconds. The configuration also lists each server in the
+ensemble. The servers are specified in the format server.X=hostname:peer
+Port:leaderPort, with the following parameters:
+X
+The ID number of the server. This must be an integer, but it does not need to be
+zero-based or sequential.
+hostname
+The hostname or IP address of the server.
+peerPort
+The TCP port over which servers in the ensemble communicate with one
+another.
+22 | Chapter 2: Installing Kafka
+
+=== PAGE 52 ===
+leaderPort
+The TCP port over which leader election is performed.
+Clients only need to be able to connect to the ensemble over the clientPort, but the
+members of the ensemble must be able to communicate with one another over all
+three ports.
+In addition to the shared configuration file, each server must have a file in the data‐
+Dir directory with the name myid. This file must contain the ID number of the server,
+which must match the configuration file. Once these steps are complete, the servers
+will start up and communicate with one another in an ensemble.
+Testing ZooKeeper Ensemble on a Single Machine
+It is possible to test and run a ZooKeeper ensemble on a single
+machine by specifying all hostnames in the config as localhost
+and have unique ports specified for peerPort and leaderPort for
+each instance. Additionally, a separate zoo.cfg would need to be cre‐
+ated for each instance with a unique dataDir and clientPort
+defined for each instance. This can be useful for testing purposes
+only, but it is not recommended for production systems.
+Installing a Kafka Broker
+Once Java and ZooKeeper are configured, you are ready to install Apache Kafka. The
+current release can be downloaded from the Kafka website. At press time, that ver‐
+sion is 2.8.0 running under Scala version 2.13.0. The examples in this chapters are
+shown using version 2.7.0.
+The following example installs Kafka in /usr/local/kafka, configured to use the Zoo‐
+Keeper server started previously and to store the message log segments stored
+in /tmp/kafka-logs:
+# tar -zxf kafka_2.13-2.7.0.tgz
+# mv kafka_2.13-2.7.0 /usr/local/kafka
+# mkdir /tmp/kafka-logs
+# export JAVA_HOME=/usr/java/jdk-11.0.10
+# /usr/local/kafka/bin/kafka-server-start.sh -daemon
+/usr/local/kafka/config/server.properties
+#
+Once the Kafka broker is started, we can verify that it is working by performing some
+simple operations against the cluster: creating a test topic, producing some messages,
+and consuming the same messages.
+Installing a Kafka Broker | 23
+
+=== PAGE 53 ===
+Create and verify a topic:
+# /usr/local/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --
+create
+--replication-factor 1 --partitions 1 --topic test
+Created topic "test".
+# /usr/local/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092
+--describe --topic test
+Topic:test    PartitionCount:1    ReplicationFactor:1    Configs:
+    Topic: test    Partition: 0    Leader: 0    Replicas: 0    Isr: 0
+#
+Produce messages to a test topic (use Ctrl-C to stop the producer at any time):
+# /usr/local/kafka/bin/kafka-console-producer.sh --bootstrap-server
+localhost:9092 --topic test
+Test Message 1
+Test Message 2
+^C
+#
+Consume messages from a test topic:
+# /usr/local/kafka/bin/kafka-console-consumer.sh --bootstrap-server
+localhost:9092 --topic test --from-beginning
+Test Message 1
+Test Message 2
+^C
+Processed a total of 2 messages
+#
+Deprecation of ZooKeeper Connections on Kafka CLI Utilities
+If you are familiar with older versions of the Kafka utilities, you
+may be used to using a --zookeeper connection string. This has
+been deprecated in almost all cases. The current best practice is to
+use the newer --bootstrap-server option and connect directly to
+the Kafka broker. If you are running in a cluster, you can provide
+the host:port of any broker in the cluster.
+Configuring the Broker
+The example configuration provided with the Kafka distribution is sufficient to run a
+standalone server as a proof of concept, but most likely will not be sufficient for large
+installations. There are numerous configuration options for Kafka that control all
+aspects of setup and tuning. Most of the options can be left at the default settings,
+though, as they deal with tuning aspects of the Kafka broker that will not be applica‐
+ble until you have a specific use case that requires adjusting these settings.
+24 | Chapter 2: Installing Kafka
+
+=== PAGE 54 ===
+General Broker Parameters
+There are several broker configuration parameters that should be reviewed when
+deploying Kafka for any environment other than a standalone broker on a single
+server. These parameters deal with the basic configuration of the broker, and most of
+them must be changed to run properly in a cluster with other brokers.
+broker.id
+Every Kafka broker must have an integer identifier, which is set using the broker.id
+configuration. By default, this integer is set to 0, but it can be any value. It is essential
+that the integer must be unique for each broker within a single Kafka cluster. The
+selection of this number is technically arbitrary, and it can be moved between brokers
+if necessary for maintenance tasks. However, it is highly recommended to set this
+value to something intrinsic to the host so that when performing maintenance it is
+not onerous to map broker ID numbers to hosts. For example, if your hostnames
+contain a unique number (such as host1.example.com, host2.example.com, etc.),
+then 1 and 2 would be good choices for the broker.id values, respectively.
+listeners
+Older versions of Kafka used a simple port configuration. This can still be used

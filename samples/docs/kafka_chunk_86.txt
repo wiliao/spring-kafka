@@ -1,0 +1,200 @@
+avoiding duplicates with producer retries,
+184
+retrying to send failed messages leading to,
+171
+durability, 162
+considerations in determining number of
+replicas per topic, 165
+of messages in a crash, 163
+E
+eager rebalances, 81
+edge clusters, aggregation of data from, 235
+Elasticsearch, ingest frameworks for, 229
+Elasticsearch, MySQL connector to (example),
+216-222
+ELT (Extract-Load-Transform), 207
+EmbeddedKafkaCluster framework, 412
+enable.auto.commit parameter, 91, 173
+enable.idempotence parameter, 60, 61, 171
+encryption, 265, 289-291
+compression of encrypted messages, 291
+and decryption, using gpg tool, 302
+Index | 439
+
+=== PAGE 469 ===
+end-to-end, 289
+SASL/DIGEST-MD5 use with TLS encryp‐
+tion, 299
+SSL, 270
+encryption algorithms
+symmetric, 289
+weak, avoiding, 277
+end-to-end encryption, 289
+end-to-end latency, 56, 165
+end-to-end monitoring, 378
+EndTransactionRequest, 199
+ensembles (ZooKeeper), 21
+entity-types of dynamic config changes, 315
+environment setup, 19-23
+installing Java, 19
+installing ZooKeeper, 20-23
+operating system, 19
+ephemeral nodes, 135
+equi-joins, 398, 399
+error handling
+additional, configuring for producers, 171
+connector configuration, 225
+idempotent producer, improvements in, 186
+errors
+correct handling by producers, 170
+KafkaProducer, 53
+nonretriable, 171
+retriable, handling by producers, 171
+ErrorsPerSec metric, 182
+ETL (Extract-Transform-Load), 207
+building ETL system with Kafka, 208
+GUI-based ETL tools, 229
+event time, 391
+EventType, 357
+eventual consistency, 114
+exactly-once delivery, 205
+exactly-once semantics, 61, 181-201
+how transactions guarantee, 188-191
+idempotent producers, 182-186
+transaction performance, 200
+transactions, 186-200
+how they work, 198-200
+how to use, 193-196
+problems not solved by, 191-193
+problems solved by, 187
+transactional IDs and fencing, 196-198
+use cases, 187
+exactly_once_beta, 193, 392
+exceptions
+producer catching, 52
+returned by KafkaProducer, 53
+ExecutionException, 119
+expected behavior, 178
+Ext4 (fourth extended filesystem), 41
+Extents File System (XFS), 41
+external secret configuration, 208
+Extract-Load-Transform (ELT), 207
+Extract-Transform-Load (see ETL)
+extreme processing, 210
+F
+failover to DR cluster in Kafka, 241-245
+after the failover, 245
+cluster discovery, 245
+data loss and incosnistensies in unplanned
+failover, 241
+start offset for applications after failover,
+242
+failure handling in data pipelines, 209
+failures, surviving in Kafka Streams, 415
+FencedProducer error, 189
+fencing of zombie applications, 196
+(see also zombie applications)
+fetch manager metrics, 373
+Fetch requests, 143
+about, 145
+from follower replicas to leader, 141
+metrics on, 361
+timing for, 363
+fetch session cache, 147
+fetch.max.bytes parameter, 89, 259
+fetch.max.wait.ms parameter, 88, 259
+fetch.min.bytes parameter, 88, 259
+FetchMessageConversionsPerSec, 155
+file descriptors, 367
+file source and file sink connector (example),
+214-216
+files
+format of stored data files, 153
+management of stored files, 152
+FileStream connectors, 216
+FileStreamSink class, 216
+FileStreamSource class, 214
+filesystem, choosing for Linux disk, 41
+fire-and-forget messages, 51
+Flink, 176
+Fluentd, 229
+Flume, 229
+440 | Index
+
+=== PAGE 470 ===
+flush.messges parameter, 169
+flush.ms parameter, 169
+follower replicas
+about, 140
+reading from, 140
+followers, 8
+foreign-key joins, 398
+formatting messages, 13
+fraud detection, 417
+Future objects
+returned by AdminClient methods, 114
+not using blocking get call on, 120
+wrapped in Result objects, 119
+Future.get method, 53
+G
+G1GC (Garbage-First garbage collector), 42,
+164
+metrics on, 366
+garbage collection
+metrics on, 366
+out of sync replicas and, 164
+garbage collector options (Java), 42
+Generic Security Service Application Program
+Interface (GSS-API), 276
+(see also SASL/GSSAPI)
+GenericRecord object (Avro), 68
+Google, cloud services for Kafka, 16
+gpg tool, 302
+group by aggregations, 395
+group coordinator (broker), 82
+group-based access control, 296
+group.id configuration (Connect workers), 212
+group.id property (consumers), 84, 173
+group.instance.id parameter, 93
+Gson library, 405
+GSS-API (Generic Security Service Application
+Program Interface), 276
+(see also SASL/GSSAPI)
+GUI-based ETL tools, 229
+gzip compression, 59
+H
+Hadoop, 14
+hard disk drives (HDDs), 33
+hardware
+failures of, 352
+selecting for Kafka broker, 33-35
+hash partitioning, 70
+hash-based message authentication code
+(HMAC), 285
+HashiCorp Vault, 208
+HDDs (hard disk drives), 33
+headers
+message batch, 154
+messages in mysql.login topic, 225
+record headers, 71, 240
+heartbeat.interval.ms parameter, 89
+heartbeats sent by consumer group to broker,
+82
+high availability, 234
+high availability in Kafka Streams, 415
+high performance (Kafka), 11
+historical metrics, 342
+HMAC (hash-based message authentication
+code), 285
+hopping windows, 391
+hostname verification (server), 271
+htpasswd tool, 279
+hub-and-spoke architecture, 236-238
+humans, metrics consumed by, 342
+I
+I/O threads (request handler threads), 143, 355
+idempotent producers, 61, 182-186
+how they work, 182-184
+broker failure, 183
+producer restart, 183
+how to use, 185

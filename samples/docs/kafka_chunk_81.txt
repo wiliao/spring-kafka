@@ -1,0 +1,200 @@
+
+=== PAGE 451 ===
+To install WSL, follow the instructions available from the Microsoft Developer Net‐
+work at the “What Is the Windows Subsystem for Linux?” page . Once that is done,
+you will need to install a JDK using apt (assuming that you have installed the Ubuntu
+system package for WSL):
+$ sudo apt install openjdk-16-jre-headless
+[sudo] password for username:
+Reading package lists... Done
+Building dependency tree
+Reading state information... Done
+[...]
+done.
+$
+Once you have installed the JDK, you can proceed to install Apache Kafka using the
+instructions in Chapter 2.
+Using Native Java
+For older versions of Windows, or if you prefer not to use the WSL environment, you
+can run Kafka natively with a Java environment for Windows.  Be aware, however,
+that this can introduce bugs specific to the Windows environment. These bugs may
+not get the attention in the Apache Kafka development community as similar prob‐
+lems on Linux might.
+Before installing ZooKeeper and Kafka, you must have a Java environment set up.
+Y ou should install the latest version of Oracle Java 16, which can be found on the
+Oracle Java SE download page. Download a full JDK package so that you have all the
+Java tools available, and follow the instructions for installation.
+Be Careful with Paths
+When installing Java and Kafka, it is highly recommended that you
+stick to installation paths that do not contain spaces. While Win‐
+dows allows spaces in paths, applications that are designed to run
+in Unix environments are not set up this way, and specifying paths
+will be difficult. When installing Java, make sure to set the installa‐
+tion path with this in mind. For example, if installing JDK 16.0.1, a
+good choice would be to use the path C:\Java\jdk-16.0.1.
+Once Java is installed, set up the environment variables so that it can be used. This is
+done in the Control Panel for Windows, though the exact location will depend on
+your version of the OS. In Windows 10, you must:
+1. Select “System and Security”
+2. Select System
+422 | Appendix A: Installing Kafka on Other Operating Systems
+
+=== PAGE 452 ===
+3. Select “ Advanced system settings, ” which will open the System Properties window
+4. On the Advanced tab, click the “Environment Variables” button
+Use this section to add a new user variable named JAVA_HOME (Figure A-1) and set it
+to the path where you installed Java. Then edit the system variable named Path and
+add a new entry that is %JAVA_HOME%\bin. Save these settings, and exit out of the Con‐
+trol Panel.
+Figure A-1. Adding the JAVA_HOME variable
+Now you can proceed to install Apache Kafka. The installation includes ZooKeeper,
+so you do not have to install it separately. The current release of Kafka  can be down‐
+loaded online. At publication time, that version is 2.8.0 running under Scala version
+2.13.0. The downloaded file will be gzip compressed and packaged with the tar util‐
+ity, so you will need to use a Windows application such as 8 Zip to uncompress it.
+Similar to installing on Linux, you must choose a directory to extract Kafka into. For
+this example, we will assume Kafka is extracted into C:\kafka_2.13-2.8.0.
+Running ZooKeeper and Kafka under Windows is a little different, as you must use
+the batch files designed for Windows rather than the shell scripts for other platforms.
+These batch files also do not support backgrounding the application, so you will need
+a separate shell for each application. First, start ZooKeeper:
+Installing Kafka on Other Operating Systems | 423
+
+=== PAGE 453 ===
+PS C:\> cd kafka_2.13-2.8.0
+PS C:\kafka_2.13-2.8.0> bin\windows\zookeeper-server-start.bat C:
+\kafka_2.13-2.8.0\config\zookeeper.properties
+[2021-07-18 17:37:12,917] INFO Reading configuration from: C:
+\kafka_2.13-2.8.0\config\zookeeper.properties (org.apache.zookeeper.server.quo
+rum.QuorumPeerConfig)
+[...]
+[2021-07-18 17:37:13,135] INFO PrepRequestProcessor (sid:0) started, reconfigEna
+bled=false (org.apache.zookeeper.server.PrepRequestProcessor)
+[2021-07-18 17:37:13,144] INFO Using checkIntervalMs=60000 maxPerMinute=10000 
+(org.apache.zookeeper.server.ContainerManager)
+Once ZooKeeper is running, you can open another window to start Kafka:
+PS C:\> cd kafka_2.13-2.8.0
+PS C:\kafka_2.13-2.8.0> .\bin\windows\kafka-server-start.bat C:
+\kafka_2.13-2.8.0\config\server.properties
+[2021-07-18 17:39:46,098] INFO Registered kafka:type=kafka.Log4jController 
+MBean (kafka.utils.Log4jControllerRegistration$)
+[...]
+[2021-07-18 17:39:47,918] INFO [KafkaServer id=0] started (kafka.server.Kafka
+Server)
+[2021-07-18 17:39:48,009] INFO [broker-0-to-controller-send-thread]: Recorded 
+new controller, from now on will use broker 192.168.0.2:9092 (id: 0 rack: null) 
+(kafka.server.BrokerToControllerRequestThread)
+Installing on macOS
+macOS runs on Darwin, a Unix OS that is derived, in part, from FreeBSD.  This
+means that many of the expectations of running on a Unix OS hold true, and instal‐
+ling applications designed for Unix, like Apache Kafka, is not too difficult. Y ou can
+either keep the installation simple by using a package manager (like Homebrew), or
+you can install Java and Kafka manually for greater control over versions.
+Using Homebrew
+If you have already installed Homebrew for macOS, you can use it to install Kafka in
+one step. This will ensure that you have Java installed first, and it will then install
+Apache Kafka 2.8.0 (as of the time of writing).
+If you have not yet installed Homebrew, do that first by following the directions on
+the installation page. Then you can install Kafka itself. The Homebrew package man‐
+ager will ensure that you have all the dependencies installed first, including Java:
+$ brew install kafka
+==> Installing dependencies for kafka: openjdk, openssl@1.1 and zookeeper
+==> Installing kafka dependency: openjdk
+==> Pouring openjdk--16.0.1.big_sur.bottle.tar.gz
+[...]
+==> Summary
+424 | Appendix A: Installing Kafka on Other Operating Systems
+
+=== PAGE 454 ===
+/usr/local/Cellar/kafka/2.8.0: 200 files, 68.2MB
+$
+Homebrew will install Kafka under /usr/local/Cellar, but the files will be linked into
+other directories:
+• Binaries and scripts will be in /usr/local/bin.
+• Kafka configurations will be in /usr/local/etc/kafka.
+• ZooKeeper configurations will be in /usr/local/etc/zookeeper.
+• The log.dirs configuration (the location for Kafka data) will be set to /usr/
+local/var/lib/kafka-logs.
+After installation is complete, you can start ZooKeeper and Kafka (this example starts
+Kafka in the foreground):
+$ /usr/local/bin/zkServer start
+ZooKeeper JMX enabled by default
+Using config: /usr/local/etc/zookeeper/zoo.cfg
+Starting zookeeper ... STARTED
+$ /usr/local/bin/kafka-server-start /usr/local/etc/kafka/server.properties
+[2021-07-18 17:52:15,688] INFO Registered kafka:type=kafka.Log4jController 
+MBean (kafka.utils.Log4jControllerRegistration$)
+[...]
+[2021-07-18 17:52:18,187] INFO [KafkaServer id=0] started (kafka.server.Kafka
+Server)
+[2021-07-18 17:52:18,232] INFO [broker-0-to-controller-send-thread]: Recorded 
+new controller, from now on will use broker 192.168.0.2:9092 (id: 0 rack: null) 
+(kafka.server.BrokerToControllerRequestThread)
+Installing Manually
+Similar to a manual installation for the Windows OS, when installing Kafka on
+macOS, you must first install a JDK. Use the same Oracle Java SE download page  to
+get the proper version for macOS. Y ou can then download Apache Kafka, similar to
+Windows again. For this example, we will assume that the Kafka download is expan‐
+ded into the /usr/local/kafka_2.13-2.8.0 directory.
+Starting ZooKeeper and Kafka looks just like starting them when using Linux, though
+you will need to make sure your JAVA_HOME directory is set first:
+$ export JAVA_HOME=`/usr/libexec/java_home -v 16.0.1`
+$ echo $JAVA_HOME
+/Library/Java/JavaVirtualMachines/jdk-16.0.1.jdk/Contents/Home
+$ /usr/local/kafka_2.13-2.8.0/bin/zookeeper-server-start.sh -daemon /usr/local/
+kafka_2.13-2.8.0/config/zookeeper.properties
+$ /usr/local/kafka_2.13-2.8.0/bin/kafka-server-start.sh /usr/local/
+kafka_2.13-2.8.0/config/server.properties
+[2021-07-18 18:02:34,724] INFO Registered kafka:type=kafka.Log4jController 
+Installing Kafka on Other Operating Systems | 425
+
+=== PAGE 455 ===
+MBean (kafka.utils.Log4jControllerRegistration$)
+[...]
+[2021-07-18 18:02:36,873] INFO [KafkaServer id=0] started (kafka.server.Kafka
+Server)
+[2021-07-18 18:02:36,915] INFO [broker-0-to-controller-send-thread]: Recorded 
+new controller, from now on will use broker 192.168.0.2:9092 (id: 0 rack: null) 
+(kafka.server.BrokerToControllerRequestThread)((("macOS, installing Kafka on", 
+startref="ix_macOS")))((("operating systems", "other than Linux, installing 
+Kafka on", startref="ix_OSinstall")))
+426 | Appendix A: Installing Kafka on Other Operating Systems
+
+=== PAGE 456 ===
+APPENDIX B
+Additional Kafka Tools
+The Apache Kafka community has created a robust ecosystem of tools and platforms
+that make the task of running and using Kafka far easier. While this is by no means
+an exhaustive list, several of the more popular tools are presented here to help get you
+started.
+Caveat Emptor
+While the authors are affiliated with some of the companies and
+projects that are included in this list, neither they nor O’Reilly
+specifically endorse one tool over others. Please be sure to do your
+own research on the suitability of these platforms and tools for the
+work that you need to do.
+Comprehensive Platforms
+Several companies offer fully integrated platforms for working with Apache Kafka. 
+This includes managed deployments of all components, such that you can focus on
+using Kafka and not on how to run it. This can present an ideal solution for use cases
+where resources are not available (or you do not want to dedicate them) for learning
+how to properly operate Kafka and the infrastructure required around it. Several also
+provide tools, such as schema management, REST interfaces, and in some cases client
+library support, so that you can be assured components interoperate correctly.
+427
+
+=== PAGE 457 ===
+Title Confluent Cloud
+URL https://www.confluent.io/confluent-cloud
+Description It’s only fitting that the company created by some of the original developers to develop and support Kafka
+provides a managed solution. Confluent Cloud combines a number of must-have tools—including schema
+management, clients, a RESTful interface, and monitoring—into a single offering. It’s available on all three
+major cloud platforms (AWS, Microsoft Azure, and Google Cloud Platform) and is backed with support provided
+by a sizable portion of the core Apache Kafka contributors employed by Confluent. Many of the components
+that are included in the platform, such as the Schema Registry and the REST proxy, are available as standalone
+tools under the Confluent Community License, which does restrict some use cases.
+Title Aiven
+URL https://aiven.io
+Description Aiven provides managed solutions for many data platforms, including Kafka. To support this, it has developed
+Karapace, which is a schema registry and a REST proxy, both API-compatible with Confluent’s components but
+supported under the Apache 2.0 license, which does not restrict use cases. In addition to the three major cloud

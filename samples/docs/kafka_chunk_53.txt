@@ -1,0 +1,200 @@
+  -storetype PKCS12 -noprompt                                             
+Generate a private key for a broker and store it in the PKCS12 file server.ks.p12.
+Generate a certificate signing request.
+Use the CA key store to sign the broker’s certificate. The signed certificate is
+stored in server.crt.
+Import the broker’s certificate chain into the broker’s key store.
+If TLS is used for inter-broker communication, create a trust store for brokers with
+the broker’s CA certificate to enable brokers to authenticate one another:
+$ keytool -import -file server.ca.crt -keystore server.ts.p12 \
+  -storetype PKCS12 -storepass server-ts-password -alias server -noprompt
+Generate a trust store for clients with the broker’s CA certificate:
+$ keytool -import -file server.ca.crt -keystore client.ts.p12 \
+  -storetype PKCS12 -storepass client-ts-password -alias ca -noprompt
+If TLS client authentication is enabled, clients must be configured with a key store.
+The following script generates a self-signed CA for clients and creates a key store for
+clients with a certificate signed by the client CA. The client CA is added to the broker
+trust store so that brokers can verify client authenticity:
+# Generate self-signed CA key-pair for clients
+keytool -genkeypair -keyalg RSA -keysize 2048 -keystore client.ca.p12         \
+  -storetype PKCS12 -storepass client-ca-password -keypass client-ca-password \
+  -alias ca -dname CN=ClientCA -ext bc=ca:true -validity 365  
+keytool -export -file client.ca.crt -keystore client.ca.p12  -storetype PKCS12 \
+  -storepass client-ca-password -alias ca -rfc
+# Create key store for clients
+keytool -genkey -keyalg RSA -keysize 2048 -keystore client.ks.p12           \
+272 | Chapter 11: Securing Kafka
+
+=== PAGE 302 ===
+  -storepass client-ks-password -keypass client-ks-password -alias client   \
+  -storetype PKCS12 -dname "CN=Metrics App,O=Confluent,C=GB" -validity 365 
+keytool -certreq -file client.csr -keystore client.ks.p12 -storetype PKCS12 \
+  -storepass client-ks-password -keypass client-ks-password -alias client
+keytool -gencert -infile client.csr -outfile client.crt                     \
+  -keystore client.ca.p12 -storetype PKCS12 -storepass client-ca-password   \
+  -alias ca -validity 365
+cat client.crt client.ca.crt > clientchain.crt
+keytool -importcert -file clientchain.crt -keystore client.ks.p12           \
+  -storepass client-ks-password -keypass client-ks-password -alias client   \
+  -storetype PKCS12 -noprompt                                 
+# Add client CA certificate to broker's trust store
+keytool -import -file client.ca.crt -keystore server.ts.p12 -alias client \
+   -storetype PKCS12 -storepass server-ts-password -noprompt  
+We create a new CA for clients in this example.
+Clients authenticating with this certificate use User:CN=Metrics App,
+O=Confluent,C=GB as the principal, by default.
+We add the client certificate chain to the client key store.
+The broker’s trust store should contain the CAs of all clients.
+Once we have the key and trust stores, we can configure TLS for brokers.  Brokers
+require a trust store only if TLS is used for inter-broker communication or if client
+authentication is enabled:
+ssl.keystore.location=/path/to/server.ks.p12
+ssl.keystore.password=server-ks-password
+ssl.key.password=server-ks-password
+ssl.keystore.type=PKCS12
+ssl.truststore.location=/path/to/server.ts.p12
+ssl.truststore.password=server-ts-password
+ssl.truststore.type=PKCS12
+ssl.client.auth=required
+Clients are configured with the generated trust store. The key store should be config‐
+ured for clients if client authentication is required.
+ssl.truststore.location=/path/to/client.ts.p12
+ssl.truststore.password=client-ts-password
+ssl.truststore.type=PKCS12
+ssl.keystore.location=/path/to/client.ks.p12
+ssl.keystore.password=client-ks-password
+ssl.key.password=client-ks-password
+ssl.keystore.type=PKCS12
+Authentication | 273
+
+=== PAGE 303 ===
+Trust Stores
+Trust store configuration can be omitted in brokers as well as cli‐
+ents when using certificates signed by well-known trusted authori‐
+ties. The default trust stores in the Java installation will be sufficient
+to establish trust in this case. Installation steps are described in
+Chapter 2.
+Key stores and trust stores must be updated periodically before certificates expire to
+avoid TLS handshake failures. Broker SSL stores can be dynamically updated by
+modifying the same file or setting the configuration option to a new versioned file. In
+both cases, the Admin API or the Kafka configs tool can be used to trigger the update.
+The following example updates the key store for the external listener of a broker with
+broker id 0 using the configs tool:
+$ bin/kafka-configs.sh --bootstrap-server localhost:9092     \
+  --command-config admin.props                               \
+  --entity-type brokers --entity-name 0 --alter --add-config \
+  'listener.name.external.ssl.keystore.location=/path/to/server.ks.p12'
+Security considerations
+TLS is widely used to provide transport layer security for several protocols, including
+HTTPS. As with any security protocol, it is important to understand the potential
+threats and mitigation strategies when adopting a protocol for mission-critical appli‐
+cations. Kafka enables only the newer protocols TLSv1.2 and TLSv1.3 by default,
+since older protocols like TLSv1.1 have known vulnerabilities. Due to issues with
+insecure renegotiation, Kafka does not support renegotiation for TLS connections.
+Hostname verification is enabled by default to prevent man-in-the-middle attacks.
+Security can be tightened further by restricting cipher suites. Strong ciphers with at
+least a 256-bit encryption key size protect against cryptographic attacks and ensure
+data integrity when transporting data over an insecure network. Some organizations
+require TLS protocol and ciphers to be restricted to comply with security standards
+like FIPS 140-2.
+Since key stores containing private keys are stored on the filesystem by default, it is
+vital to limit access to key store files using filesystem permissions. Standard Java TLS
+features can be used to enable certificate revocation if a private key is compromised.
+Short-lived keys can be used to reduce exposure in this case.
+TLS handshakes are expensive and utilize a significant amount of time on
+network threads in brokers. Listeners using TLS on insecure networks should be
+protected against denial-of-service attacks using connection quotas and limits to pro‐
+tect availability of brokers. The broker configuration option connection.failed.
+authentication.delay.ms can be used to delay failed response on authentication
+failures to reduce the rate at which authentication failures are retried by clients.
+274 | Chapter 11: Securing Kafka
+
+=== PAGE 304 ===
+SASL
+Kafka protocol supports authentication using SASL and has built-in support for sev‐
+eral commonly used SASL mechanisms. SASL can be combined with TLS as the
+transport layer to provide a secure channel with authentication and encryption. SASL
+authentication is performed through a sequence of server challenges and client
+responses where the SASL mechanism defines the sequence and wire format of chal‐
+lenges and responses. Kafka brokers support the following SASL mechanisms out of
+the box with customizable callbacks to integrate with existing security infrastructure:
+GSSAPI
+Kerberos authentication is supported using SASL/GSSAPI and can be used to
+integrate with Kerberos servers like Active Directory or OpenLDAP .
+PLAIN
+Username/password authentication that is typically used with a custom server-
+side callback to verify passwords from an external password store.
+SCRAM-SHA-256 and SCRAM-SHA-512
+Username/password authentication available out of the box with Kafka without
+the need for additional password stores.
+OAUTHBEARER
+Authentication using OAuth bearer tokens that is typically used with custom call‐
+backs to acquire and validate tokens granted by standard OAuth servers.
+One or more SASL mechanisms may be enabled on each SASL-enabled listener in the
+broker by configuring sasl.enabled.mechanisms for that listener. Clients may
+choose any of the enabled mechanisms by configuring sasl.mechanism.
+Kafka uses the Java Authentication and Authorization Service (JAAS) for configuring
+SASL. The configuration option sasl.jaas.config contains a single JAAS configura‐
+tion entry that specifies a login module and its options. Brokers use the listener
+and mechanism prefixes when configuring sasl.jaas.config. For example,
+listener.name.external.gssapi.sasl.jaas.config configures the JAAS configu‐
+ration entry for SASL/GSSAPI on the listener named EXTERNAL. The login process on
+brokers and clients uses the JAAS configuration to determine the public and private
+credentials used for authentication.
+Authentication | 275
+
+=== PAGE 305 ===
+JAAS Configuration File
+JAAS configuration may also be specified in configuration files
+using the Java system property java.security.auth.login.
+config. However, the Kafka option sasl.jaas.config is recom‐
+mended since it supports password protection and separate config‐
+uration for each SASL mechanism when multiple mechanisms are
+enabled on a listener.
+SASL mechanisms supported by Kafka can be customized to integrate with third-
+party authentication servers using callback handlers. A login callback handler may be
+provided for brokers or clients to customize the login process, for example, to acquire
+credentials to be used for authentication. A server callback handler may be provided
+to perform authentication of client credentials, for example, to verify passwords using
+an external password server. A client callback handler may be provided to inject client
+credentials instead of including them in the JAAS configuration.
+In the following subsections, we explore the SASL mechanisms supported by Kafka in
+more detail.
+SASL/GSSAPI
+Kerberos is a widely used network authentication protocol that uses strong cryptogra‐
+phy to support secure mutual authentication over an insecure network. Generic Secu‐
+rity Service Application Program Interface (GSS-API) is a framework for providing
+security services to applications using different authentication mechanisms.
+RFC-4752 introduces the SASL mechanism GSSAPI for authentication using GSS-
+API’s Kerberos V5 mechanism. The availability of open source as well as enterprise-
+grade commercial implementations of Kerberos servers has made Kerberos a popular
+choice for authentication across many sectors with strict security requirements. Kafka
+supports Kerberos authentication using SASL/GSSAPI.
+Configuring SASL/GSSAPI.    Kafka uses GSSAPI security providers included in the Java
+runtime environment to support secure authentication using Kerberos. JAAS config‐
+uration for GSSAPI includes the path of a keytab file that contains the mapping of
+principals to their long-term keys in encrypted form. To configure GSSAPI for brok‐
+ers, create a keytab for each broker with a principal that includes the broker’s host‐
+name. Broker hostnames are verified by clients to ensure server authenticity and
+prevent man-in-the-middle attacks. Kerberos requires a secure DNS service for host
+name lookup during authentication. In deployments where forward and reverse
+lookup do not match, the Kerberos configuration file krb5.conf on clients can be con‐
+figured to set rdns=false to disable reverse lookup. JAAS configuration for each
+broker should include the Kerberos V5 login module from the Java runtime, the path‐
+name of the keytab file, and the full broker principal:
+276 | Chapter 11: Securing Kafka
+
+=== PAGE 306 ===
+sasl.enabled.mechanisms=GSSAPI
+listener.name.external.gssapi.sasl.jaas.config=\ 
+  com.sun.security.auth.module.Krb5LoginModule required \
+    useKeyTab=true storeKey=true     \
+    keyTab="/path/to/broker1.keytab" \ 
+    principal="kafka/broker1.example.com@EXAMPLE.COM"; 
+We use sasl.jaas.config prefixed with the listener prefix, which contains the
+listener name and SASL mechanism in lowercase.
+Keytab files must be readable by the broker process.
+Service principal for brokers should include the broker hostname.
+If SASL/GSSAPI is used for inter-broker communication, inter-broker SASL mecha‐
+nism and the Kerberos service name should also be configured for brokers:
+sasl.mechanism.inter.broker.protocol=GSSAPI

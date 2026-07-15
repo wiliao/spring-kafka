@@ -1,0 +1,200 @@
+it is used, the choice of filesystem for this disk can have the next largest impact on
+performance. There are many different filesystems available, but the most common
+choices for local filesystems are either Ext4 (fourth extended filesystem) or Extents
+File System (XFS). XFS has become the default filesystem for many Linux distribu‐
+tions, and this is for good reason: it outperforms Ext4 for most workloads with mini‐
+mal tuning required. Ext4 can perform well but requires using tuning parameters that
+are considered less safe. This includes setting the commit interval to a longer time
+than the default of five to force less frequent flushes. Ext4 also introduced delayed
+allocation of blocks, which brings with it a greater chance of data loss and filesystem
+corruption in case of a system failure. The XFS filesystem also uses a delayed alloca‐
+tion algorithm, but it is generally safer than the one used by Ext4. XFS also has better
+performance for Kafka’s workload without requiring tuning beyond the automatic
+tuning performed by the filesystem. It is also more efficient when batching disk
+writes, all of which combine to give better overall I/O throughput.
+Regardless of which filesystem is chosen for the mount that holds the log segments, it
+is advisable to set the noatime mount option for the mount point. File metadata con‐
+tains three timestamps: creation time ( ctime), last modified time ( mtime), and last
+access time (atime). By default, the atime is updated every time a file is read. This
+generates a large number of disk writes. The atime attribute is generally considered to
+be of little use, unless an application needs to know if a file has been accessed since it
+was last modified (in which case the relatime option can be used). The atime is not
+used by Kafka at all, so disabling it is safe. Setting noatime on the mount will prevent
+these timestamp updates from happening but will not affect the proper handling of
+the ctime and mtime attributes. Using the option largeio can also help improve effi‐
+ciency for Kafka for when there are larger disk writes.
+Networking
+Adjusting the default tuning of the Linux networking stack is common for any appli‐
+cation that generates a high amount of network traffic, as the kernel is not tuned by
+default for large, high-speed data transfers. In fact, the recommended changes for
+Kafka are the same as those suggested for most web servers and other networking
+applications. The first adjustment is to change the default and maximum amount of
+memory allocated for the send and receive buffers for each socket. This will signifi‐
+cantly increase performance for large transfers. The relevant parameters for the send
+and receive buffer default size per socket are net.core.wmem_default and
+net.core.rmem_default, and a reasonable setting for these parameters is 131072, or
+128 KiB. The parameters for the send and receive buffer maximum sizes are
+net.core.wmem_max and net.core.rmem_max, and a reasonable setting is 2097152, or
+Configuring Kafka Clusters | 41
+
+=== PAGE 71 ===
+2 MiB. Keep in mind that the maximum size does not indicate that every socket will
+have this much buffer space allocated; it only allows up to that much if needed.
+In addition to the socket settings, the send and receive buffer sizes for TCP sockets
+must be set separately using the net.ipv4.tcp_wmem and net.ipv4.tcp_rmem param‐
+eters. These are set using three space-separated integers that specify the minimum,
+default, and maximum sizes, respectively. The maximum size cannot be larger
+than the values specified for all sockets using net.core.wmem_max and
+net.core.rmem_max. An example setting for each of these parameters is “4096 65536
+2048000, ” which is a 4 KiB minimum, 64 KiB default, and 2 MiB maximum buffer.
+Based on the actual workload of your Kafka brokers, you may want to increase the
+maximum sizes to allow for greater buffering of the network connections.
+There are several other network tuning parameters that are useful to set. Enabling
+TCP window scaling by setting net.ipv4.tcp_window_scaling to 1 will allow clients
+to transfer data more efficiently, and allow that data to be buffered on the broker side.
+Increasing the value of net.ipv4.tcp_max_syn_backlog above the default of 1024
+will allow a greater number of simultaneous connections to be accepted. Increasing
+the value of net.core.netdev_max_backlog to greater than the default of 1000 can
+assist with bursts of network traffic, specifically when using multigigabit network
+connection speeds, by allowing more packets to be queued for the kernel to process
+them.
+Production Concerns
+Once you are ready to move your Kafka environment out of testing and into your
+production operations, there are a few more things to think about that will assist with
+setting up a reliable messaging service.
+Garbage Collector Options
+Tuning the Java garbage-collection options for an application has always been some‐
+thing of an art, requiring detailed information about how the application uses mem‐
+ory and a significant amount of observation and trial and error. Thankfully, this has
+changed with Java 7 and the introduction of the Garbage-First garbage collector
+(G1GC). While G1GC was considered unstable initially, it saw marked improvement
+in JDK8 and JDK11. It is now recommended for Kafka to use G1GC as the default
+garbage collector. G1GC is designed to automatically adjust to different workloads
+and provide consistent pause times for garbage collection over the lifetime of the
+application. It also handles large heap sizes with ease by segmenting the heap into
+smaller zones and not collecting over the entire heap in each pause.
+42 | Chapter 2: Installing Kafka
+
+=== PAGE 72 ===
+G1GC does all of this with a minimal amount of configuration in normal operation.
+There are two configuration options for G1GC used to adjust its performance:
+MaxGCPauseMillis
+This option specifies the preferred pause time for each garbage-collection cycle.
+It is not a fixed maximum—G1GC can and will exceed this time if required. This
+value defaults to 200 milliseconds. This means that G1GC will attempt to sched‐
+ule the frequency of garbage collector cycles, as well as the number of zones that
+are collected in each cycle, such that each cycle will take approximately 200 ms.
+InitiatingHeapOccupancyPercent
+This option specifies the percentage of the total heap that may be in use before
+G1GC will start a collection cycle. The default value is 45. This means that G1GC
+will not start a collection cycle until after 45% of the heap is in use. This includes
+both the new (Eden) and old zone usage, in total.
+The Kafka broker is fairly efficient with the way it utilizes heap memory and creates
+garbage objects, so it is possible to set these options lower. The garbage collector tun‐
+ing options provided in this section have been found to be appropriate for a server
+with 64 GB of memory, running Kafka in a 5 GB heap. For MaxGCPauseMillis, this
+broker can be configured with a value of 20 ms. The value for InitiatingHeap
+OccupancyPercent is set to 35, which causes garbage collection to run slightly earlier
+than with the default value.
+Kafka was originally released before the G1GC collector was available and considered
+stable. Therefore, Kafka defaults to using concurrent mark and sweep garbage collec‐
+tion to ensure compatibility with all JVMs. New best practice is to use G1GC for any‐
+thing for Java 1.8 and later. The change is easy to make via environment variables.
+Using the start command from earlier in the chapter, modify it as follows:
+# export KAFKA_JVM_PERFORMANCE_OPTS="-server -Xmx6g -Xms6g
+-XX:MetaspaceSize=96m -XX:+UseG1GC
+-XX:MaxGCPauseMillis=20 -XX:InitiatingHeapOccupancyPercent=35
+-XX:G1HeapRegionSize=16M -XX:MinMetaspaceFreeRatio=50
+-XX:MaxMetaspaceFreeRatio=80 -XX:+ExplicitGCInvokesConcurrent"
+# /usr/local/kafka/bin/kafka-server-start.sh -daemon
+/usr/local/kafka/config/server.properties
+#
+Datacenter Layout
+For testing and development environments, the physical location of the Kafka brokers
+within a datacenter is not as much of a concern, as there is not as severe an impact if
+the cluster is partially or completely unavailable for short periods of time. However,
+when serving production traffic, downtime usually means dollars lost, whether
+through loss of services to users or loss of telemetry on what the users are doing. This
+Production Concerns | 43
+
+=== PAGE 73 ===
+is when it becomes critical to configure replication within the Kafka cluster (see
+Chapter 7 ), which is also when it is important to consider the physical location of
+brokers in their racks in the datacenter. A datacenter environment that has a concept
+of fault zones is preferable. If not addressed prior to deploying Kafka, expensive
+maintenance to move servers around may be needed.
+Kafka can assign new partitions to brokers in a rack-aware manner, making sure that
+replicas for a single partition do not share a rack. To do this, the broker.rack config‐
+uration for each broker must be set properly. This config can be set to the fault
+domain in cloud environments as well for similar reasons. However, this only applies
+to partitions that are newly created. The Kafka cluster does not monitor for partitions
+that are no longer rack aware (for example, as a result of a partition reassignment),
+nor does it automatically correct this situation. It is recommend to use tools that keep
+your cluster balanced properly to maintain rack awareness, such as Cruise Control
+(see Appendix B ). Configuring this properly will help to ensure continued rack
+awareness over time.
+Overall, the best practice is to have each Kafka broker in a cluster installed in a differ‐
+ent rack, or at the very least not share single points of failure for infrastructure serv‐
+ices such as power and network. This typically means at least deploying the servers
+that will run brokers with dual power connections (to two different circuits) and dual
+network switches (with a bonded interface on the servers themselves to failover
+seamlessly). Even with dual connections, there is a benefit to having brokers in com‐
+pletely separate racks. From time to time, it may be necessary to perform physical
+maintenance on a rack or cabinet that requires it to be offline (such as moving servers
+around or rewiring power connections).
+Colocating Applications on ZooKeeper
+Kafka utilizes ZooKeeper for storing metadata information about the brokers, topics,
+and partitions. Writes to ZooKeeper are only performed on changes to the member‐
+ship of consumer groups or on changes to the Kafka cluster itself. This amount of
+traffic is generally minimal, and it does not justify the use of a dedicated ZooKeeper
+ensemble for a single Kafka cluster. In fact, many deployments will use a single Zoo‐
+Keeper ensemble for multiple Kafka clusters (using a chroot ZooKeeper path for each
+cluster, as described earlier in this chapter).
+44 | Chapter 2: Installing Kafka
+
+=== PAGE 74 ===
+Kafka Consumers, Tooling, ZooKeeper, and You
+As time goes on, dependency on ZooKeeper is shrinking. In ver‐
+sion 2.8.0, Kafka is introducing an early-access look at a completely
+ZooKeeper-less Kafka, but it is still not production ready. However,
+we can still see this reduced reliance on ZooKeeper in versions
+leading up to this. For example, in older versions of Kafka, con‐
+sumers (in addition to the brokers) utilized ZooKeeper to directly
+store information about the composition of the consumer group
+and what topics it was consuming, and to periodically commit off‐
+sets for each partition being consumed (to enable failover between
+consumers in the group). With version 0.9.0.0, the consumer inter‐
+face was changed, allowing this to be managed directly with the
+Kafka brokers. In each 2.x release of Kafka, we see additional steps
+to removing ZooKeeper from other required paths of Kafka.
+Administration tools now connect directly to the cluster and have
+deprecated the need to connect to ZooKeeper directly for opera‐
+tions such as topic creations, dynamic configuration changes, etc.
+As such, many of the command-line tools that previously used the
+--zookeeper flags have been updated to use the --bootstrap-
+server option. The --zookeeper options can still be used but have
+been deprecated and will be removed in the future when Kafka is
+no longer required to connect to ZooKeeper to create, manage, or
+consume from topics.
+However, there is a concern with consumers and ZooKeeper under certain configura‐
+tions. While the use of ZooKeeper for such purposes is deprecated, consumers have a
+configurable choice to use either ZooKeeper or Kafka for committing offsets, and
+they can also configure the interval between commits. If the consumer uses Zoo‐
+Keeper for offsets, each consumer will perform a ZooKeeper write at every interval
+for every partition it consumes. A reasonable interval for offset commits is 1 minute,
+as this is the period of time over which a consumer group will read duplicate mes‐
+sages in the case of a consumer failure. These commits can be a significant amount of
+ZooKeeper traffic, especially in a cluster with many consumers, and will need to be
+taken into account. It may be necessary to use a longer commit interval if the Zoo‐
+Keeper ensemble is not able to handle the traffic. However, it is recommended that
+consumers using the latest Kafka libraries use Kafka for committing offsets, removing
+the dependency on ZooKeeper.
+Outside of using a single ensemble for multiple Kafka clusters, it is not recommended
+to share the ensemble with other applications, if it can be avoided. Kafka is sensitive
+to ZooKeeper latency and timeouts, and an interruption in communications with the
+ensemble will cause the brokers to behave unpredictably. This can easily cause multi‐
+ple brokers to go offline at the same time should they lose ZooKeeper connections,
+which will result in offline partitions. It also puts stress on the cluster controller,
+Production Concerns | 45
+
+=== PAGE 75 ===

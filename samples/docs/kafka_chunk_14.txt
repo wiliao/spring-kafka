@@ -1,0 +1,200 @@
+ing retries is: “In case of a broker crash, it typically takes leader
+election 30 seconds to complete, so let’s keep retrying for 120 sec‐
+onds just to be on the safe side. ” Instead of converting this mental
+dialog to number of retries and time between retries, you just con‐
+figure deliver.timeout.ms to 120.
+request.timeout.ms
+This parameter controls how long the producer will wait for a reply from the server
+when sending data. Note that this is the time spent waiting on each producer request
+before giving up; it does not include retries, time spent before sending, and so on. If
+the timeout is reached without reply, the producer will either retry sending or com‐
+plete the callback with a TimeoutException.
+retries and retry.backoff.ms
+When the producer receives an error message from the server, the error could be
+transient (e.g., a lack of leader for a partition). In this case, the value of the retries
+parameter will control how many times the producer will retry sending the message
+before giving up and notifying the client of an issue. By default, the producer will wait
+100 ms between retries, but you can control this using the retry.backoff.ms
+parameter.
+We recommend against using these parameters in the current version of Kafka.
+Instead, test how long it takes to recover from a crashed broker (i.e., how long until
+all partitions get new leaders), and set delivery.timeout.ms such that the total
+amount of time spent retrying will be longer than the time it takes the Kafka cluster
+to recover from the crash—otherwise, the producer will give up too soon.
+Not all errors will be retried by the producer. Some errors are not transient and will
+not cause retries (e.g., “message too large” error). In general, because the producer
+handles retries for you, there is no point in handling retries within your own applica‐
+tion logic. Y ou will want to focus your efforts on handling nonretriable errors or cases
+where retry attempts were exhausted.
+If you want to completely disable retries, setting retries=0 is the
+only way to do so.
+58 | Chapter 3: Kafka Producers: Writing Messages to Kafka
+
+=== PAGE 88 ===
+linger.ms
+linger.ms controls the amount of time to wait for additional messages before send‐
+ing the current batch. KafkaProducer sends a batch of messages either when the cur‐
+rent batch is full or when the linger.ms limit is reached. By default, the producer will
+send messages as soon as there is a sender thread available to send them, even if
+there’s just one message in the batch. By setting linger.ms higher than 0, we instruct
+the producer to wait a few milliseconds to add additional messages to the batch
+before sending it to the brokers. This increases latency a little and significantly
+increases throughput—the overhead per message is much lower, and compression, if
+enabled, is much better.
+buffer.memory
+This config sets the amount of memory the producer will use to buffer messages wait‐
+ing to be sent to brokers. If messages are sent by the application faster than they can
+be delivered to the server, the producer may run out of space, and additional send()
+calls will block for max.block.ms and wait for space to free up before throwing an
+exception. Note that unlike most producer exceptions, this timeout is thrown by
+send() and not by the resulting Future.
+compression.type
+By default, messages are sent uncompressed. This parameter can be set to snappy,
+gzip, lz4, or zstd, in which case the corresponding compression algorithms will be
+used to compress the data before sending it to the brokers. Snappy compression was
+invented by Google to provide decent compression ratios with low CPU overhead
+and good performance, so it is recommended in cases where both performance and
+bandwidth are a concern. Gzip compression will typically use more CPU and time
+but results in better compression ratios, so it is recommended in cases where network
+bandwidth is more restricted. By enabling compression, you reduce network utiliza‐
+tion and storage, which is often a bottleneck when sending messages to Kafka.
+batch.size
+When multiple records are sent to the same partition, the producer will batch them
+together. This parameter controls the amount of memory in bytes (not messages!)
+that will be used for each batch. When the batch is full, all the messages in the batch
+will be sent. However, this does not mean that the producer will wait for the batch to
+become full. The producer will send half-full batches and even batches with just a sin‐
+gle message in them. Therefore, setting the batch size too large will not cause delays
+in sending messages; it will just use more memory for the batches. Setting the batch
+Configuring Producers | 59
+
+=== PAGE 89 ===
+size too small will add some overhead because the producer will need to send mes‐
+sages more frequently.
+max.in.flight.requests.per.connection
+This controls how many message batches the producer will send to the server without
+receiving responses. Higher settings can increase memory usage while improving
+throughput. Apache’s wiki experiments show  that in a single-DC environment, the
+throughput is maximized with only 2 in-flight requests; however, the default value is
+5 and shows similar performance.
+Ordering Guarantees
+Apache Kafka preserves the order of messages within a partition.
+This means that if messages are sent from the producer in a specific
+order, the broker will write them to a partition in that order and all
+consumers will read them in that order. For some use cases, order
+is very important. There is a big difference between depositing
+$100 in an account and later withdrawing it, and the other way
+around! However, some use cases are less sensitive.
+Setting the retries parameter to nonzero and the max.in.
+flight.requests.per.connection to more than 1 means that it is
+possible that the broker will fail to write the first batch of messages,
+succeed in writing the second (which was already in-flight), and
+then retry the first batch and succeed, thereby reversing the order.
+Since we want at least two in-flight requests for performance rea‐
+sons, and a high number of retries for reliability reasons, the best 
+solution is to set enable.idempotence=true. This guarantees mes‐
+sage ordering with up to five in-flight requests and also guarantees
+that retries will not introduce duplicates. Chapter 8  discusses the
+idempotent producer in depth.
+max.request.size
+This setting controls the size of a produce request sent by the producer. It caps both
+the size of the largest message that can be sent and the number of messages that the
+producer can send in one request. For example, with a default maximum request size
+of 1 MB, the largest message you can send is 1 MB, or the producer can batch 1,024
+messages of size 1 KB each into one request.  In addition, the broker has its own limit
+on the size of the largest message it will accept ( message.max.bytes). It is usually a
+good idea to have these configurations match, so the producer will not attempt to
+send messages of a size that will be rejected by the broker.
+60 | Chapter 3: Kafka Producers: Writing Messages to Kafka
+
+=== PAGE 90 ===
+receive.buffer.bytes and send.buffer.bytes
+These are the sizes of the TCP send and receive buffers used by the sockets when
+writing and reading data. If these are set to –1, the OS defaults will be used. It is a
+good idea to increase these when producers or consumers communicate with brokers
+in a different datacenter, because those network links typically have higher latency
+and lower bandwidth.
+enable.idempotence
+Starting in version 0.11, Kafka supports exactly once semantics. Exactly once is a fairly
+large topic, and we’ll dedicate an entire chapter to it, but idempotent producer is a
+simple and highly beneficial part of it.
+Suppose you configure your producer to maximize reliability: acks=all and a
+decently large delivery.timeout.ms to allow sufficient retries. These make sure each
+message will be written to Kafka at least once. In some cases, this means that mes‐
+sages will be written to Kafka more than once. For example, imagine that a broker
+received a record from the producer, wrote it to local disk, and the record was suc‐
+cessfully replicated to other brokers, but then the first broker crashed before sending
+a response to the producer. The producer will wait until it reaches request.
+timeout.ms and then retry. The retry will go to the new leader that already has a copy
+of this record since the previous write was replicated successfully. Y ou now have a
+duplicate record.
+To avoid this, you can set enable.idempotence=true. When the idempotent pro‐
+ducer is enabled, the producer will attach a sequence number to each record it sends.
+If the broker receives records with the same sequence number, it will reject the sec‐
+ond copy and the producer will receive the harmless DuplicateSequenceException.
+Enabling idempotence requires max.in.flight.requests.per.
+connection to be less than or equal to 5, retries to be greater than
+0, and acks=all. If incompatible values are set, a ConfigException
+will be thrown.
+Serializers
+As seen in previous examples, producer configuration includes mandatory serializers.
+We’ve seen how to use the default String serializer. Kafka also includes serializers for
+integers, ByteArrays, and many more, but this does not cover most use cases. Even‐
+tually, you will want to be able to serialize more generic records.
+We will start by showing how to write your own serializer and then introduce the
+Avro serializer as a recommended alternative.
+Serializers | 61
+
+=== PAGE 91 ===
+Custom Serializers
+When the object you need to send to Kafka is not a simple string or integer, you have 
+a choice of either using a generic serialization library like Avro, Thrift, or Protobuf to
+create records, or creating a custom serialization for objects you are already using. We
+highly recommend using a generic serialization library. In order to understand how
+the serializers work and why it is a good idea to use a serialization library, let’s see
+what it takes to write your own custom serializer.
+Suppose that instead of recording just the customer name, you create a simple class to
+represent customers:
+public class Customer {
+    private int customerID;
+    private String customerName;
+    public Customer(int ID, String name) {
+        this.customerID = ID;
+        this.customerName = name;
+    }
+    public int getID() {
+        return customerID;
+    }
+    public String getName() {
+        return customerName;
+    }
+}
+Now suppose we want to create a custom serializer for this class. It will look some‐
+thing like this:
+import org.apache.kafka.common.errors.SerializationException;
+import java.nio.ByteBuffer;
+import java.util.Map;
+public class CustomerSerializer implements Serializer<Customer> {
+    @Override
+    public void configure(Map configs, boolean isKey) {
+        // nothing to configure
+    }
+    @Override
+    /**
+    We are serializing Customer as:
+    4 byte int representing customerId
+    4 byte int representing length of customerName in UTF-8 bytes (0 if
+        name is Null)
+    N bytes representing customerName in UTF-8
+62 | Chapter 3: Kafka Producers: Writing Messages to Kafka
+
+=== PAGE 92 ===
+    **/
+    public byte[] serialize(String topic, Customer data) {
+        try {
+            byte[] serializedName;
+            int stringSize;
+            if (data == null)
+                return null;
+            else {
+                if (data.getName() != null) {

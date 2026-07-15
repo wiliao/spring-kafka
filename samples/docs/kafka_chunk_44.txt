@@ -1,0 +1,200 @@
+tions or libraries are common causes for errors. If all is well, we can search the index
+for our records:
+gwen$ curl -s -X "GET" "http://localhost:9200/mysql.login/_search?pretty=true"
+{
+  "took" : 40,
+  "timed_out" : false,
+  "_shards" : {
+    "total" : 1,
+Kafka Connect | 221
+
+=== PAGE 251 ===
+    "successful" : 1,
+    "skipped" : 0,
+    "failed" : 0
+  },
+  "hits" : {
+    "total" : {
+      "value" : 2,
+      "relation" : "eq"
+    },
+    "max_score" : 1.0,
+    "hits" : [
+      {
+        "_index" : "mysql.login",
+        "_type" : "_doc",
+        "_id" : "mysql.login+0+0",
+        "_score" : 1.0,
+        "_source" : {
+          "username" : "gwenshap",
+          "login_time" : 1621699811000
+        }
+      },
+      {
+        "_index" : "mysql.login",
+        "_type" : "_doc",
+        "_id" : "mysql.login+0+1",
+        "_score" : 1.0,
+        "_source" : {
+          "username" : "tpalino",
+          "login_time" : 1621699816000
+        }
+      }
+    ]
+  }
+}
+If you add new records to the table in MySQL, they will automatically appear in the
+mysql.login topic in Kafka and in the corresponding Elasticsearch index.
+Now that we’ve seen how to build and install the JDBC source and Elasticsearch sink,
+we can build and use any pair of connectors that suits our use case. Confluent main‐
+tains a set of their own prebuilt connectors, as well as some from across the commu‐
+nity and other vendors, at Confluent Hub. Y ou can pick any connector on the list that
+you wish to try out, download it, configure it—either based on the documentation or
+by pulling the configuration from the REST API—and run it on your Connect
+worker cluster.
+222 | Chapter 9: Building Data Pipelines
+
+=== PAGE 252 ===
+Build Your Own Connectors
+The Connector API is public and anyone can create a new connec‐
+tor. So if the datastore you wish to integrate with does not have an
+existing connector, we encourage you to write your own. Y ou can
+then contribute it to Confluent Hub so others can discover and use
+it. It is beyond the scope of this chapter to discuss all the details
+involved in building a connector, but there are multiple blog posts
+that explain how to do so , and good talks from Kafka Summit NY
+2019, Kafka Summit London 2018 , and ApacheCon. We also rec‐
+ommend looking at the existing connectors as a starting point and
+perhaps jump-starting using an Apache Maven archtype . We
+always encourage you to ask for assistance or show off your latest
+connectors on the Apache Kafka community mailing list
+(users@kafka.apache.org) or submit them to Confluent Hub so they
+can be easily found.
+Single Message Transformations
+Copying records from MySQL to Kafka and from there to Elastic is rather useful on
+its own, but ETL pipelines typically involve a transformation step.  In the Kafka eco‐
+system we separate transformations to single message transformations (SMTs), which
+are stateless, and stream processing, which can be stateful. SMTs can be done within
+Kafka Connect transforming messages while they are being copied, often without
+writing any code. More complex transformations, which typically involve joins or
+aggregation, will require the stateful Kafka Streams framework. We’ll discuss Kafka
+Streams in a later chapter.
+Apache Kafka includes the following SMTs:
+Cast
+Change data type of a field.
+MaskField
+Replace the contents of a field with null. This is useful for removing sensitive or
+personally identifying data.
+Filter
+Drop or include all messages that match a specific condition. Built-in conditions
+include matching on a topic name, a particular header, or whether the message is
+a tombstone (that is, has a null value).
+Flatten
+Transform a nested data structure to a flat one. This is done by concatenating all
+the names of all fields in the path to a specific value.
+Kafka Connect | 223
+
+=== PAGE 253 ===
+HeaderFrom
+Move or copy fields from the message into the header.
+InsertHeader
+Add a static string to the header of each message.
+InsertField
+Add a new field to a message, either using values from its metadata such as offset,
+or with a static value.
+RegexRouter
+Change the destination topic using a regular expression and a replacement string.
+ReplaceField
+Remove or rename a field in the message.
+TimestampConverter
+Modify the time format of a field—for example, from Unix Epoch to a String.
+TimestampRouter
+Modify the topic based on the message timestamp. This is mostly useful in sink
+connectors when we want to copy messages to specific table partitions based on
+their timestamp and the topic field is used to find an equivalent dataset in the
+destination system.
+In addition, transformations are available from contributors outside the main Apache
+Kafka code base. Those can be found on GitHub ( Lenses.io, Aiven, and Jeremy Cus‐
+tenborder have useful collections) or on Confluent Hub.
+To learn more about Kafka Connect SMTs, you can read detailed examples of many
+transformations in the “Twelve Days of SMT”  blog series. In addition, you can learn
+how to write your own transformations by following a tutorial and deep dive.
+As an example, let’s say that we want to add a record header to each record produced
+by the MySQL connector we created previously. The header will indicate that the
+record was created by this MySQL connector, which is useful in case auditors want to
+examine the lineage of these records.
+To do this, we’ll replace the previous MySQL connector configuration with the
+following:
+echo '{
+  "name": "mysql-login-connector",
+  "config": {
+    "connector.class": "JdbcSourceConnector",
+    "connection.url": "jdbc:mysql://127.0.0.1:3306/test?user=root",
+    "mode": "timestamp",
+    "table.whitelist": "login",
+    "validate.non.null": "false",
+224 | Chapter 9: Building Data Pipelines
+
+=== PAGE 254 ===
+    "timestamp.column.name": "login_time",
+    "topic.prefix": "mysql.",
+    "name": "mysql-login-connector",
+    "transforms": "InsertHeader",
+    "transforms.InsertHeader.type":
+      "org.apache.kafka.connect.transforms.InsertHeader",
+    "transforms.InsertHeader.header": "MessageSource",
+    "transforms.InsertHeader.value.literal": "mysql-login-connector"
+  }}' | curl -X POST -d @- http://localhost:8083/connectors --header "content-
+Type:application/json"
+Now, if you insert a few more records into the MySQL table that we created in the
+previous example, you’ll be able to see that the new messages in the mysql.login
+topic have headers (note that you’ll need Apache Kafka 2.7 or higher to print headers
+in the console consumer):
+bin/kafka-console-consumer.sh --bootstrap-server=localhost:9092 --topic 
+mysql.login --from-beginning --property print.headers=true
+NO_HEADERS {"schema":{"type":"struct","fields":
+[{"type":"string","optional":true,"field":"username"},
+{"type":"int64","optional":true,"name":"org.apache.kafka.connect.data.Time-
+stamp","version":1,"field":"login_time"}],"optional":false,"name":"login"},"pay-
+load":{"username":"tpalino","login_time":1621699816000}}
+MessageSource:mysql-login-connector {"schema":{"type":"struct","fields":
+[{"type":"string","optional":true,"field":"username"},
+{"type":"int64","optional":true,"name":"org.apache.kafka.connect.data.Time-
+stamp","version":1,"field":"login_time"}],"optional":false,"name":"login"},"pay-
+load":{"username":"rajini","login_time":1621803287000}}
+As you can see, the old records show NO_HEADERS, but the new records show
+MessageSource:mysql-login-connector.
+Error Handling and Dead Letter Queues
+Transforms is an example of a connector config that isn’t specific to
+one connector but can be used in the configuration of any connec‐
+tor. Another very useful connector configuration that can be used
+in any sink connector is error.tolerance—you can configure any
+connector to silently drop corrupt messages, or to route them to a
+special topic called a “dead letter queue. ” Y ou can find more details 
+in the “Kafka Connect Deep Dive—Error Handling and Dead Let‐
+ter Queues” blog post.
+A Deeper Look at Kafka Connect
+To understand how Kafka Connect works, you need to understand three basic con‐
+cepts and how they interact. As we explained earlier and demonstrated with
+Kafka Connect | 225
+
+=== PAGE 255 ===
+examples, to use Kafka Connect, you need to run a cluster of workers and create/
+remove connectors. An additional detail we did not dive into before is the handling
+of data by converters—these are the components that convert MySQL rows to JSON
+records, which the connector wrote into Kafka.
+Let’s look a bit deeper into each system and how they interact with one another.
+Connectors and tasks
+Connector plug-ins implement the Connector API, which includes two parts:
+Connectors
+The connector is responsible for three important things:
+• Determining how many tasks will run for the connector
+• Deciding how to split the data-copying work between the tasks
+• Getting configurations for the tasks from the workers and passing them
+along
+For example, the JDBC source connector will connect to the database, discover
+the existing tables to copy, and based on that decide how many tasks are
+needed—choosing the lower of tasks.max configuration and the number of
+tables. Once it decides how many tasks will run, it will generate a configuration
+for each task—using both the connector configuration (e.g., connection.url)
+and a list of tables it assigns for each task to copy. The taskConfigs() method

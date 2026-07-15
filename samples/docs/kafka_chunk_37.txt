@@ -1,0 +1,200 @@
+ers on the failed broker. Say that we have a producer that produced messages to topic
+A, partition 0, which had its lead replica on broker 5 and a follower replica on broker
+3. After broker 5 fails, broker 3 becomes the new leader. The producer will discover
+that the new leader is broker 3 via the metadata protocol and start producing to it.
+Idempotent Producer | 183
+
+=== PAGE 213 ===
+But how will broker 3 know which sequences were already produced in order to
+reject duplicates?
+The leader keeps updating its in-memory producer state with the five last sequence
+IDs every time a new message is produced. Follower replicas update their own in-
+memory buffers every time they replicate new messages from the leader. This means
+that when a follower becomes a leader, it already has the latest sequence numbers in
+memory, and validation of newly produced messages can continue without any issues
+or delays.
+But what happens when the old leader comes back? After a restart, the old in-
+memory producer state will no longer be in memory. To assist in recovery, brokers
+take a snapshot of the producer state to a file when they shut down or every time a
+segment is created. When the broker starts, it reads the latest state from a file. The
+newly restarted broker then keeps updating the producer state as it catches up by rep‐
+licating from the current leader, and it has the most current sequence IDs in memory
+when it is ready to become a leader again.
+What if a broker crashed and the last snapshot is not updated? Producer ID and
+sequence ID are also part of the message format that is written to Kafka’s logs. During
+crash recovery, the producer state will be recovered by reading the older snapshot and
+also messages from the latest segment of each partition. A new snapshot will be
+stored as soon as the recovery process completes.
+An interesting question is what happens if there are no messages? Imagine that a cer‐
+tain topic has two hours of retention time, but no new messages arrived in the last
+two hours—there will be no messages to use to recover the state if a broker crashed.
+Luckily, no messages also means no duplicates. We will start accepting messages
+immediately (while logging a warning about the lack of state), and create the pro‐
+ducer state from the new messages that arrive.
+Limitations of the Idempotent Producer
+Kafka’s idempotent producer only prevents duplicates in case of retries that are
+caused by the producer’s internal logic. Calling producer.send() twice with the same
+message will create a duplicate, and the idempotent producer won’t prevent it. This is
+because the producer has no way of knowing that the two records that were sent are
+in fact the same record. It is always a good idea to use the built-in retry mechanism of
+the producer rather than catching producer exceptions and retrying from the applica‐
+tion itself; the idempotent producer makes this pattern even more appealing—it is the
+easiest way to avoid duplicates when retrying.
+184 | Chapter 8: Exactly-Once Semantics
+
+=== PAGE 214 ===
+It is also rather common to have applications that have multiple instances or even one
+instance with multiple producers. If two of these producers attempt to send identical
+messages, the idempotent producer will not detect the duplication. This scenario is
+fairly common in applications that get data from a source—a directory with files, for
+instance—and produce it to Kafka. If the application happened to have two instances
+reading the same file and producing records to Kafka, we will get multiple copies of
+the records in that file.
+The idempotent producer will only prevent duplicates caused by
+the retry mechanism of the producer itself, whether the retry is
+caused by producer, network, or broker errors. But nothing else.
+How Do I Use the Kafka Idempotent Producer?
+This is the easy part. Add enable.idempotence=true to the producer configuration.
+If the producer is already configured with acks=all, there will be no difference in
+performance. By enabling idempotent producer, the following things will change:
+• To retrieve a producer ID, the producer will make one extra API call when start‐
+ing up.
+• Each record batch sent will include the producer ID and the sequence ID for the
+first message in the batch (sequence IDs for each message in the batch are
+derived from the sequence ID of the first message plus a delta). These new fields
+add 96 bits to each record batch (producer ID is a long, and sequence is an inte‐
+ger), which is barely any overhead for most workloads.
+• Brokers will validate the sequence numbers from any single producer instance
+and guarantee the lack of duplicate messages.
+• The order of messages produced to each partition will be guaranteed, through all
+failure scenarios, even if max.in.flight.requests.per.connection is set to
+more than 1 (5 is the default and also the highest value supported by the idempo‐
+tent producer).
+Idempotent Producer | 185
+
+=== PAGE 215 ===
+Idempotent producer logic and error handling improved signifi‐
+cantly in version 2.5 (both on the producer side and the broker
+side) as a result of KIP-360. Prior to release 2.5, the producer state
+was not always maintained for long enough, which resulted in fatal
+UNKNOWN_PRODUCER_ID errors in various scenarios (parti‐
+tion reassignment had a known edge case where the new replica
+became the leader before any writes happened from a specific pro‐
+ducer, meaning that the new leader had no state for that partition).
+In addition, previous versions attempted to rewrite the sequence
+IDs in some error scenarios, which could lead to duplicates. In
+newer versions, if we encounter a fatal error for a record batch, this
+batch and all the batches that are in flight will be rejected. The user
+who writes the application can handle the exception and decide
+whether to skip those records or retry and risk duplicates and
+reordering.
+Transactions
+As we mentioned in the introduction to this chapter, transactions  were added to
+Kafka to guarantee the correctness of applications developed using Kafka Streams.  In
+order for a stream processing application to generate correct results, each input
+record must be processed exactly one time, and its processing result will be reflected
+exactly one time, even in case of failure. Transactions in Apache Kafka allow stream
+processing applications to generate accurate results. This, in turn, enables developers
+to use stream processing applications in use cases where accuracy is a key
+requirement.
+It is important to keep in mind that transactions in Kafka were developed specifically
+for stream processing applications. And therefore they were built to work with the
+“consume-process-produce” pattern that forms the basis of stream processing appli‐
+cations. Use of transactions can guarantee exactly-once semantics in this context—the
+processing of each input record will be considered complete after the application’s
+internal state has been updated and the results were successfully produced to output
+topics. In “What Problems Aren’t Solved by Transactions?” on page 191, we’ll explore
+a few scenarios where Kafka’s exactly-once guarantees will not apply.
+Transactions is the name of the underlying mechanism. Exactly-
+once semantics or exactly-once guarantees is the behavior of a
+stream processing application. Kafka Streams uses transactions to
+implement its exactly-once guarantees. Other stream processing
+frameworks, such as Spark Streaming or Flink, use different mech‐
+anisms to provide their users with exactly-once semantics.
+186 | Chapter 8: Exactly-Once Semantics
+
+=== PAGE 216 ===
+Transactions Use Cases
+Transactions are useful for any stream processing application where accuracy is
+important, and especially where stream processing includes aggregation and/or joins.
+If the stream processing application only performs single record transformation and
+filtering, there is no internal state to update, and even if duplicates were introduced in
+the process, it is fairly straightforward to filter them out of the output stream. When
+the stream processing application aggregates several records into one, it is much more
+difficult to check whether a result record is wrong because some input records were
+counted more than once; it is impossible to correct the result without reprocessing
+the input.
+Financial applications are typical examples of complex stream processing applications
+where exactly-once capabilities are used to guarantee accurate aggregation. However,
+because it is rather trivial to configure any Kafka Streams application to provide
+exactly-once guarantees, we’ve seen it enabled in more mundane use cases, including,
+for instance, chatbots.
+What Problems Do Transactions Solve?
+Consider a simple stream processing application: it reads events from a source topic,
+maybe processes them, and writes results to another topic. We want to be sure that
+for each message we process, the results are written exactly once. What can possibly
+go wrong?
+It turns out that quite a few things could go wrong. Let’s look at two scenarios.
+Reprocessing caused by application crashes
+After consuming a message from the source cluster and processing it, the application
+has to do two things: produce the result to the output topic, and commit the offset of
+the message that we consumed. Suppose that these two separate actions happen in
+this order. What happens if the application crashes after the output was produced but
+before the offset of the input was committed?
+In Chapter 4, we discussed what happens when a consumer crashes. After a few sec‐
+onds, the lack of heartbeat will trigger a rebalance, and the partitions the consumer
+was consuming from will be reassigned to a different consumer. That consumer will
+begin consuming records from those partitions, starting at the last committed offset.
+This means that all the records that were processed by the application between the
+last committed offset and the crash will be processed again, and the results will be
+written to the output topic again—resulting in duplicates.
+Transactions | 187
+
+=== PAGE 217 ===
+Reprocessing caused by zombie applications
+What happens if our application just consumed a batch of records from Kafka and
+then froze or lost connectivity to Kafka before doing anything else with this batch of
+records?
+Just like in the previous scenario, after several heartbeats are missed, the application
+will be assumed dead and its partitions reassigned to another consumer in the con‐
+sumer group. That consumer will reread that batch of records, process it, produce the
+results to an output topic, and continue on.
+Meanwhile, the first instance of the application—the one that froze—may resume its
+activity: process the batch of records it recently consumed, and produce the results to
+the output topic. It can do all that before it polls Kafka for records or sends a heart‐
+beat and discovers that it is supposed to be dead and another instance now owns
+those partitions.
+A consumer that is dead but doesn’t know it is called a zombie. In this scenario, we
+can see that without additional guarantees, zombies can produce data to the output
+topic and cause duplicate results.
+How Do Transactions Guarantee Exactly-Once?
+Take our simple stream processing application. It reads data from one topic, pro‐
+cesses it, and writes the result to another topic. Exactly-once processing means that
+consuming, processing, and producing are done atomically. Either the offset of the
+original message is committed and the result is successfully produced or neither of
+these things happen. We need to make sure that partial results—where the offset is
+committed but the result isn’t produced, or vice versa—can’t happen.
+To support this behavior, Kafka transactions introduce the idea of atomic multiparti‐
+tion writes. The idea is that committing offsets and producing results both involve
+writing messages to partitions. However, the results are written to an output topic,
+and offsets are written to the _consumer_offsets topic. If we can open a transaction,
+write both messages, and commit if both were written successfully—or abort to retry
+if they were not—we will get the exactly-once semantics that we are after.
+Figure 8-1  illustrates a simple stream processing application, performing an atomic
+multipartition write to two partitions while also committing offsets for the event it
+consumed.
+188 | Chapter 8: Exactly-Once Semantics
+
+=== PAGE 218 ===
+Figure 8-1. Transactional producer with atomic multipartition write
+To use transactions and perform atomic multipartition writes, we use a transactional
+producer. A transactional producer is simply a Kafka producer that is configured with
+a transactional.id and has been initialized using initTransactions(). Unlike
+producer.id, which is generated automatically by Kafka brokers, transactional.id
+is part of the producer configuration and is expected to persist between restarts. In
+fact, the main role of the transactional.id is to identify the same producer across
+restarts. Kafka brokers maintain transactional.id to producer.id mapping, so if
+initTransactions() is called again with an existing transactional.id, the pro‐
+ducer will also be assigned the same producer.id instead of a new random number.
+Preventing zombie instances of the application from creating duplicates requires a
+mechanism for zombie fencing , or preventing zombie instances of the application

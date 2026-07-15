@@ -1,0 +1,200 @@
+as a backup for simple configurations but is a deprecated config. The example config‐
+uration file starts Kafka with a listener on TCP port 9092. The new listeners config
+is a comma-separated list of URIs that we listen on with the listener names. If the lis‐
+tener name is not a common security protocol, then another config
+listener.security.protocol.map must also be configured. A listener is defined as
+<protocol>://<hostname>:<port>. An example of a legal listener config is PLAIN
+TEXT://localhost:9092,SSL://:9091. Specifying the hostname as 0.0.0.0 will
+bind to all interfaces. Leaving the hostname empty will bind it to the default interface.
+Keep in mind that if a port lower than 1024 is chosen, Kafka must be started as root.
+Running Kafka as root is not a recommended configuration.
+zookeeper.connect
+The location of the ZooKeeper used for storing the broker metadata is set using the
+zookeeper.connect configuration parameter. The example configuration uses a Zoo‐
+Keeper running on port 2181 on the local host, which is specified as localhost:2181.
+The format for this parameter is a semicolon-separated list of hostname:port/path
+strings, which include:
+hostname
+The hostname or IP address of the ZooKeeper server.
+Configuring the Broker | 25
+
+=== PAGE 55 ===
+port
+The client port number for the server.
+/path
+An optional ZooKeeper path to use as a chroot environment for the Kafka clus‐
+ter. If it is omitted, the root path is used.
+If a chroot path (a path designated to act as the root directory for a given application)
+is specified and does not exist, it will be created by the broker when it starts up.
+Why Use a Chroot Path?
+It is generally considered to be good practice to use a chroot path
+for the Kafka cluster. This allows the ZooKeeper ensemble to be
+shared with other applications, including other Kafka clusters,
+without a conflict. It is also best to specify multiple ZooKeeper
+servers (which are all part of the same ensemble) in this configura‐
+tion. This allows the Kafka broker to connect to another member
+of the ZooKeeper ensemble in the event of server failure.
+log.dirs
+Kafka persists all messages to disk, and these log segments are stored in the directory
+specified in the log.dir configuration. For multiple directories, the config log.dirs
+is preferable. If this value is not set, it will default back to log.dir. log.dirs is a
+comma-separated list of paths on the local system. If more than one path is specified,
+the broker will store partitions on them in a “least-used” fashion, with one partition’s
+log segments stored within the same path. Note that the broker will place a new parti‐
+tion in the path that has the least number of partitions currently stored in it, not the
+least amount of disk space used, so an even distribution of data across multiple direc‐
+tories is not guaranteed.
+num.recovery.threads.per.data.dir
+Kafka uses a configurable pool of threads for handling log segments.  Currently, this
+thread pool is used:
+• When starting normally, to open each partition’s log segments
+• When starting after a failure, to check and truncate each partition’s log segments
+• When shutting down, to cleanly close log segments
+By default, only one thread per log directory is used. As these threads are only used
+during startup and shutdown, it is reasonable to set a larger number of threads in
+order to parallelize operations. Specifically, when recovering from an unclean shut‐
+down, this can mean the difference of several hours when restarting a broker with a
+26 | Chapter 2: Installing Kafka
+
+=== PAGE 56 ===
+large number of partitions! When setting this parameter, remember that the number
+configured is per log directory specified with log.dirs. This means that if num.
+recovery.threads.per.data.dir is set to 8, and there are 3 paths specified in
+log.dirs, this is a total of 24 threads.
+auto.create.topics.enable
+The default Kafka configuration specifies that the broker should automatically create
+a topic under the following circumstances:
+• When a producer starts writing messages to the topic
+• When a consumer starts reading messages from the topic
+• When any client requests metadata for the topic
+In many situations, this can be undesirable behavior, especially as there is no way to
+validate the existence of a topic through the Kafka protocol without causing it to be
+created. If you are managing topic creation explicitly, whether manually or through a
+provisioning system, you can set the auto.create.topics.enable configuration to
+false.
+auto.leader.rebalance.enable
+In order to ensure a Kafka cluster doesn’t become unbalanced by having all topic
+leadership on one broker, this config can be specified to ensure leadership is balanced
+as much as possible. It enables a background thread that checks the distribution
+of partitions at regular intervals (this interval is configurable via leader.
+imbalance.check.interval.seconds). If leadership imbalance exceeds another con‐
+fig, leader.imbalance.per.broker.percentage, then a rebalance of preferred lead‐
+ers for partitions is started.
+delete.topic.enable
+Depending on your environment and data retention guidelines, you may wish to lock
+down a cluster to prevent arbitrary deletions of topics. Disabling topic deletion can
+be set by setting this flag to false.
+Topic Defaults
+The Kafka server configuration specifies many default configurations for topics that
+are created. Several of these parameters, including partition counts and message
+retention, can be set per topic using the administrative tools (covered in Chapter 12).
+The defaults in the server configuration should be set to baseline values that are
+appropriate for the majority of the topics in the cluster.
+Configuring the Broker | 27
+
+=== PAGE 57 ===
+Using Per-Topic Overrides
+In older versions of Kafka, it was possible to specify per-topic over‐
+rides for these configurations in the broker configuration using the
+parameters log.retention.hours.per.topic, log.retention.
+bytes.per.topic, and log.segment.bytes.per.topic. These
+parameters are no longer supported, and overrides must be speci‐
+fied using the administrative tools.
+num.partitions
+The num.partitions parameter determines how many partitions a new topic is cre‐
+ated with, primarily when automatic topic creation is enabled (which is the default
+setting). This parameter defaults to one partition. Keep in mind that the number of
+partitions for a topic can only be increased, never decreased. This means that if a
+topic needs to have fewer partitions than num.partitions, care will need to be taken
+to manually create the topic (discussed in Chapter 12).
+As described in Chapter 1, partitions are the way a topic is scaled within a Kafka clus‐
+ter, which makes it important to use partition counts that will balance the message
+load across the entire cluster as brokers are added. Many users will have the partition
+count for a topic be equal to, or a multiple of, the number of brokers in the cluster.
+This allows the partitions to be evenly distributed to the brokers, which will evenly
+distribute the message load. For example, a topic with 10 partitions operating in a
+Kafka cluster with 10 hosts with leadership balanced among all 10 hosts will have
+optimal throughput. This is not a requirement, however, as you can also balance mes‐
+sage load in other ways, such as having multiple topics.
+How to Choose the Number of Partitions
+There are several factors to consider when choosing the number of partitions:
+• What is the throughput you expect to achieve for the topic? For example, do you
+expect to write 100 KBps or 1 GBps?
+• What is the maximum throughput you expect to achieve when consuming from
+a single partition? A partition will always be consumed completely by a single
+consumer (even when not using consumer groups, the consumer must read all
+messages in the partition). If you know that your slower consumer writes the
+data to a database and this database never handles more than 50 MBps from each
+thread writing to it, then you know you are limited to 50 MBps throughput when
+consuming from a partition.
+• Y ou can go through the same exercise to estimate the maximum throughput per
+producer for a single partition, but since producers are typically much faster than
+consumers, it is usually safe to skip this.
+28 | Chapter 2: Installing Kafka
+
+=== PAGE 58 ===
+• If you are sending messages to partitions based on keys, adding partitions later
+can be very challenging, so calculate throughput based on your expected future
+usage, not the current usage.
+• Consider the number of partitions you will place on each broker and available
+diskspace and network bandwidth per broker.
+• Avoid overestimating, as each partition uses memory and other resources on the
+broker and will increase the time for metadata updates and leadership transfers.
+• Will you be mirroring data? Y ou may need to consider the throughput of your
+mirroring configuration as well. Large partitions can become a bottleneck in
+many mirroring configurations.
+• If you are using cloud services, do you have IOPS (input/output operations per
+second) limitations on your VMs or disks? There may be hard caps on the num‐
+ber of IOPS allowed depending on your cloud service and VM configuration that
+will cause you to hit quotas. Having too many partitions can have the side effect
+of increasing the amount of IOPS due to the parallelism involved.
+With all this in mind, it’s clear that you want many partitions, but not too many. If
+you have some estimate regarding the target throughput of the topic and the expected
+throughput of the consumers, you can divide the target throughput by the expected
+consumer throughput and derive the number of partitions this way. So if we want to
+be able to write and read 1 GBps from a topic, and we know each consumer can only
+process 50 MBps, then we know we need at least 20 partitions. This way, we can have
+20 consumers reading from the topic and achieve 1 GBps.
+If you don’t have this detailed information, our experience suggests that limiting the
+size of the partition on the disk to less than 6 GB per day of retention often gives sat‐
+isfactory results. Starting small and expanding as needed is easier than starting too
+large.
+default.replication.factor
+If auto-topic creation is enabled, this configuration sets what the replication factor
+should be for new topics. Replication strategy can vary depending on the desired
+durability or availability of a cluster and will be discussed more in later chapters. The
+following is a brief recommendation if you are running Kafka in a cluster that will
+prevent outages due to factors outside of Kafka’s internal capabilities, such as hard‐
+ware failures.
+It is highly recommended to set the replication factor to at least 1 above the
+min.insync.replicas setting. For more fault-resistant settings, if you have large
+enough clusters and enough hardware, setting your replication factor to 2 above the
+min.insync.replicas (abbreviated as RF++) can be preferable. RF++ will allow eas‐
+ier maintenance and prevent outages. The reasoning behind this recommendation is
+Configuring the Broker | 29
+
+=== PAGE 59 ===
+to allow for one planned outage within the replica set and one unplanned outage to
+occur simultaneously. For a typical cluster, this would mean you’ d have a minimum of
+three replicas of every partition. An example of this is if there is a network switch
+outage, disk failure, or some other unplanned problem during a rolling deployment
+or upgrade of Kafka or the underlying OS, you can be assured there will still be an
+additional replica available. This will be discussed more in Chapter 7.
+log.retention.ms
+The most common configuration for how long Kafka will retain messages is by time.
+The default is specified in the configuration file using the log.retention.hours
+parameter, and it is set to 168 hours, or one week. However, there are two other
+parameters allowed, log.retention.minutes and log.retention.ms. All three of
+these control the same goal (the amount of time after which messages may be
+deleted), but the recommended parameter to use is log.retention.ms, as the smaller
+unit size will take precedence if more than one is specified. This will ensure that the
+value set for log.retention.ms is always the one used. If more than one is specified,
+the smaller unit size will take precedence.
+Retention by Time and Last Modified Times
+Retention by time is performed by examining the last modified
+time (mtime) on each log segment file on disk. Under normal clus‐
+ter operations, this is the time that the log segment was closed, and
+represents the timestamp of the last message in the file. However,
+when using administrative tools to move partitions between brok‐
+ers, this time is not accurate and will result in excess retention for
+these partitions. For more information on this, see Chapter 12 dis‐

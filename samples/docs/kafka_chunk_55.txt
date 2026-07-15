@@ -1,0 +1,200 @@
+    username="kafka" password="kafka-password"; 
+Username and password for inter-broker connections initiated by the broker.
+Clients must be configured to use one of the SASL mechanisms enabled in the broker,
+and the client JAAS configuration must include a username and password:
+sasl.mechanism=SCRAM-SHA-512
+sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule \
+  required username="Alice" password="Alice-password";
+Y ou can add new SCRAM users using --add-config and delete users using the
+--delete-config option of the configs tool. When an existing user is deleted, new
+connections cannot be established for that user, but existing connections of the user
+will continue to work. A reauthentication interval can be configured for the broker to
+limit the amount of time existing connections may continue to operate after a user is
+deleted. The following example deletes the SCRAM-SHA-512 config for Alice to
+remove Alice’s credentials for that mechanism:
+$ bin/kafka-configs.sh --zookeeper localhost:2181 --alter --delete-config \
+  'SCRAM-SHA-512' --entity-type users --entity-name Alice
+Security considerations.    SCRAM applies a one-way cryptographic hash function on
+the password combined with a random  salt to avoid the actual password being trans‐
+mitted over the wire or stored in a database. However, any password-based system is
+only as secure as the passwords. Strong password policies must be enforced to protect
+the system from brute-force or dictionary attacks. Kafka provides safeguards by sup‐
+porting only the strong hashing algorithms SHA-256 and SHA-512 and avoiding
+weaker algorithms like SHA-1. This is combined with a high default iteration count of
+4,096 and unique random salts for every stored key to limit the impact if ZooKeeper
+security is compromised.
+Y ou should take additional precautions to protect the keys transmitted during hand‐
+shake and the keys stored in ZooKeeper to protect against brute-force attacks.
+SCRAM must be used with SASL_SSL as the security protocol to avoid eavesdroppers
+from gaining access to hashed keys during authentication. ZooKeeper must also be
+SSL-enabled, and ZooKeeper data must be protected using disk encryption to ensure
+that stored keys cannot be retrieved even if the store is compromised. In deployments
+without a secure ZooKeeper, SCRAM callbacks can be used to integrate with a secure
+external credential store.
+282 | Chapter 11: Securing Kafka
+
+=== PAGE 312 ===
+SASL/OAUTHBEARER
+OAuth is an authorization framework that enables applications to obtain limited
+access to HTTP services. RFC-7628 defines the OAUTHBEARER SASL mechanism
+that enables credentials obtained using OAuth 2.0 to access protected resources in
+non-HTTP protocols. OAUTHBEARER avoids security vulnerabilities in mecha‐
+nisms that use long-term passwords by using OAuth 2.0 bearer tokens with a shorter
+lifetime and limited resource access. Kafka supports SASL/OAUTHBEARER for cli‐
+ent authentication, enabling integration with third-party OAuth servers. The built-in
+implementation of OAUTHBEARER uses unsecured JSON Web Tokens (JWTs) and
+is not suitable for production use. Custom callbacks can be added to integrate with
+standard OAuth servers to provide secure authentication using the OAUTHBEARER
+mechanism in production deployments.
+Configuring SASL/OAUTHBEARER.    The built-in implementation of SASL/OAUTH‐
+BEARER in Kafka does not validate tokens and hence only requires the login module
+to be specified in the JAAS configuration. If the listener is used for inter-broker com‐
+munication, details of the token used for client connections initiated by brokers must
+also be provided. The option unsecuredLoginStringClaim_sub is the subject claim
+that determines the KafkaPrincipal for the connection by default:
+sasl.enabled.mechanisms=OAUTHBEARER
+sasl.mechanism.inter.broker.protocol=OAUTHBEARER
+listener.name.external.oauthbearer.sasl.jaas.config=\
+  org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule \
+    required unsecuredLoginStringClaim_sub="kafka"; 
+Subject claim for the token used for inter-broker connections.
+Clients must be configured with the subject claim option unsecuredLoginString
+Claim_sub. Other claims and token lifetime may also be configured:
+sasl.mechanism=OAUTHBEARER
+sasl.jaas.config=\
+  org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule \
+    required unsecuredLoginStringClaim_sub="Alice"; 
+User:Alice is the default KafkaPrincipal for connections using this
+configuration.
+To integrate Kafka with third-party OAuth servers for using bearer tokens in produc‐
+tion, Kafka clients must be configured with sasl.login.callback.handler.class to
+acquire tokens from the OAuth server using the long-term password or a refresh
+token. If OAUTHBEARER is used for inter-broker communication, brokers must
+also be configured with a login callback handler to acquire tokens for client connec‐
+tions created by the broker for inter-broker communication:
+Authentication | 283
+
+=== PAGE 313 ===
+@Override
+public void handle(Callback[] callbacks) throws UnsupportedCallbackException {
+  OAuthBearerToken token = null;
+  for (Callback callback : callbacks) {
+    if (callback instanceof OAuthBearerTokenCallback) {
+      token = acquireToken(); 
+      ((OAuthBearerTokenCallback) callback).token(token);
+    } else if (callback instanceof SaslExtensionsCallback) { 
+      ((SaslExtensionsCallback) callback).extensions(processExtensions(token));
+    } else
+      throw new UnsupportedCallbackException(callback);
+  }
+}
+Clients must acquire a token from the OAuth server and set a valid token on the
+callback.
+The client may also include optional extensions.
+Brokers must also be configured with a server callback handler using
+listener.name.<listener-name>.oauthbearer.sasl.server.callback.handler.
+class for validating tokens provided by the client:
+@Override
+public void handle(Callback[] callbacks) throws UnsupportedCallbackException {
+  for (Callback callback : callbacks) {
+    if (callback instanceof OAuthBearerValidatorCallback) {
+      OAuthBearerValidatorCallback cb = (OAuthBearerValidatorCallback) callback;
+      try {
+        cb.token(validatedToken(cb.tokenValue()));   
+      } catch (OAuthBearerIllegalTokenException e) {
+        OAuthBearerValidationResult r = e.reason();
+        cb.error(errorStatus(r), r.failureScope(), r.failureOpenIdConfig());
+      }
+    } else if (callback instanceof OAuthBearerExtensionsValidatorCallback) {
+      OAuthBearerExtensionsValidatorCallback ecb =
+          (OAuthBearerExtensionsValidatorCallback) callback;
+      ecb.inputExtensions().map().forEach((k, v) ->
+        ecb.valid(validateExtension(k, v)));   
+    } else {
+      throw new UnsupportedCallbackException(callback);
+    }
+  }
+}
+OAuthBearerValidatorCallback contains the token from the client. Brokers val‐
+idate this token.
+Brokers validate any optional extensions from the client.
+284 | Chapter 11: Securing Kafka
+
+=== PAGE 314 ===
+Security considerations.    Since SASL/OAUTHBEARER clients send OAuth 2.0 bearer
+tokens over the network and these tokens may be used to impersonate clients, TLS
+must be enabled to encrypt authentication traffic. Short-lived tokens can be used to
+limit exposure if tokens are compromised. Reauthentication may be enabled for brok‐
+ers to prevent connections outliving the tokens used for authentication. A reauthenti‐
+cation interval configured on brokers, combined with token revocation support, limit
+the amount of time an existing connection may continue to use a token after
+revocation.
+Delegation tokens
+Delegation tokens are shared secrets between Kafka brokers and clients that provide a
+lightweight configuration mechanism without the requirement to distribute SSL key
+stores or Kerberos keytabs to client applications. Delegation tokens can be used to
+reduce the load on authentication servers, like the Kerberos Key Distribution Center
+(KDC). Frameworks like Kafka Connect can use delegation tokens to simplify secu‐
+rity configuration for workers. A client that has authenticated with Kafka brokers can
+create delegation tokens for the same user principal and distribute these tokens to
+workers, which can then authenticate directly with Kafka brokers.  Each delegation
+token consists of a token identifier and a hash-based message authentication code
+(HMAC) used as a shared secret. Client authentication with delegation tokens is per‐
+formed using SASL/SCRAM with the token identifier as username and HMAC as the
+password.
+Delegation tokens can be created or renewed using the Kafka Admin API or the
+delegation-tokens command. To create delegation tokens for the principal
+User:Alice, the client must be authenticated using Alice’s credentials for any authen‐
+tication protocol other than delegation tokens. Clients authenticated using delegation
+tokens cannot create other delegation tokens:
+$ bin/kafka-delegation-tokens.sh --bootstrap-server localhost:9092 \
+  --command-config admin.props --create --max-life-time-period -1  \
+  --renewer-principal User:Bob  
+$ bin/kafka-delegation-tokens.sh --bootstrap-server localhost:9092 \ 
+  --command-config admin.props --renew --renew-time-period -1 --hmac c2VjcmV0
+If Alice runs this command, the generated token can be used to impersonate
+Alice. The owner of this token is User:Alice. We also configure User:Bob as a
+token renewer.
+The renewal command can be run by the token owner (Alice) or the token
+renewer (Bob).
+Authentication | 285
+
+=== PAGE 315 ===
+Configuring delegation tokens.    To create and validate delegation tokens, all brokers
+must be configured with the same master key using the configuration option
+delegation.token.master.key. This key can only be rotated by restarting all brok‐
+ers. All existing tokens should be deleted before updating the master key since they
+can no longer be used, and new tokens should be created after the key is updated on
+all brokers.
+At least one of the SASL/SCRAM mechanisms must be enabled on brokers to support
+authentication using delegation tokens. Clients should be configured to use SCRAM
+with a token identifier as username and token HMAC as the password. The Kafka
+Principal for the connections using this configuration will be the original principal
+associated with the token, e.g., User:Alice:
+sasl.mechanism=SCRAM-SHA-512
+sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule \
+  required tokenauth="true" username="MTIz" password="c2VjcmV0"; 
+SCRAM configuration with tokenauth is used to configure delegation tokens.
+Security considerations.    Like the built-in SCRAM implementation, delegation tokens
+are suitable for production use only in deployments where ZooKeeper is secure. All
+the security considerations described under SCRAM also apply to delegation tokens.
+The master key used by brokers for generating tokens must be protected using
+encryption or by externalizing the key in a secure password store. Short-lived delega‐
+tion tokens can be used to limit exposure if a token is compromised. Reauthentica‐
+tion can be enabled in brokers to prevent connections operating with expired tokens
+and to limit the amount of time existing connections may continue to operate after
+token deletion.
+Reauthentication
+As we saw earlier, Kafka brokers perform client authentication when a connection is
+established by the client. Client credentials are verified by the brokers, and the con‐
+nection authenticates successfully if the credentials are valid at that time.  Some secu‐
+rity mechanisms like Kerberos and OAuth use credentials with a limited lifetime.
+Kafka uses a background login thread to acquire new credentials before the old ones
+expire, but the new credentials are used only to authenticate new connections by
+default. Existing connections that were authenticated with old credentials continue to
+process requests until disconnection occurs due to a request timeout, an idle timeout,
+or network errors. Long-lived connections may continue to process requests long
+after the credentials used to authenticate the connections expire. Kafka brokers sup‐
+port reauthentication for connections authenticated using SASL using the configura‐
+tion option connections.max.reauth.ms. When this option is set to a positive
+286 | Chapter 11: Securing Kafka

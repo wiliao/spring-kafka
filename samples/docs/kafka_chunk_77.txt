@@ -1,0 +1,200 @@
+or table is joined with an arbitrary field from another stream or table. Y ou can learn
+more about how it works in “Crossing the Streams”, a talk from Kafka Summit 2020,
+or the more in-depth blog post.
+Streaming Join
+Sometimes we want to join two real event streams rather than a stream with a table.
+What makes a stream “real”? If you recall the discussion at the beginning of the chap‐
+ter, streams are unbounded. When we use a stream to represent a table, we can ignore
+most of the history in the stream because we only care about the current state in the
+table. But when we join two streams, we are joining the entire history, trying to match
+events in one stream with events in the other stream that have the same key and hap‐
+pened in the same time windows. This is why a streaming join is also called a win‐
+dowed join.
+For example, let’s say that we have one stream with search queries that people entered
+into our website and another stream with clicks, which include clicks on search
+results. We want to match search queries with the results they clicked on so that we
+will know which result is most popular for which query. Obviously, we want to match
+results based on the search term but only match them within a certain time window.
+We assume the result is clicked seconds after the query was entered into our search
+engine. So we keep a small, few-seconds-long window on each stream and match the
+results from each window. See Figure 14-8.
+398 | Chapter 14: Stream Processing
+
+=== PAGE 428 ===
+Figure 14-8. Joining two streams of events; these joins always involve a moving time
+window
+Kafka Streams supports equi-joins, where streams, queries, and clicks are parti‐
+tioned on the same keys, which are also the join keys. This way, all the click events
+from user_id:42 end up in partition 5 of the clicks topic, and all the search events
+for user_id:42 end up in partition 5 of the search topic. Kafka Streams then makes
+sure that partition 5 of both topics is assigned to the same task. So this task sees all
+the relevant events for user_id:42. It maintains the join window for both topics in its
+embedded RocksDB state store, and this is how it can perform the join.
+Out-of-Sequence Events
+Handling events that arrive at the stream at the wrong time is a challenge not just in
+stream processing but also in traditional ETL systems. Out-of-sequence events hap‐
+pen quite frequently and expectedly in IoT scenarios ( Figure 14-9 ). For example, a
+mobile device loses WiFi signal for a few hours and sends a few hours’ worth of
+events when it reconnects. This also happens when monitoring network equipment
+(a faulty switch doesn’t send diagnostics signals until it is repaired) or manufacturing
+(network connectivity in plants is notoriously unreliable, especially in developing
+countries).
+Figure 14-9. Out-of-sequence events
+Our streams applications need to be able to handle those scenarios. This typically
+means the application has to do the following:
+Stream Processing Design Patterns | 399
+
+=== PAGE 429 ===
+• Recognize that an event is out of sequence—this requires that the application
+examines the event time and discovers that it is older than the current time.
+• Define a time period during which it will attempt to reconcile out-of-sequence
+events. Perhaps a three-hour delay should be reconciled, and events over three
+weeks old can be thrown away.
+• Have an in-band capability to reconcile this event. This is the main difference
+between streaming apps and batch jobs. If we have a daily batch job and a few
+events arrived after the job completed, we can usually just rerun yesterday’s job
+and update the events. With stream processing, there is no “rerun yesterday’s
+job”—the same continuous process needs to handle both old and new events at
+any given moment.
+• Be able to update results. If the results of the stream processing are written into a
+database, a put or update is enough to update the results. If the stream app sends
+results by email, updates may be trickier.
+Several stream processing frameworks, including Google’s Dataflow and Kafka
+Streams, have built-in support for the notion of event time independent of the pro‐
+cessing time, and the ability to handle events with event times that are older or newer
+than the current processing time. This is typically done by maintaining multiple
+aggregation windows available for update in the local state and giving developers the
+ability to configure how long to keep those window aggregates available for updates.
+Of course, the longer the aggregation windows are kept available for updates, the
+more memory is required to maintain the local state.
+The Kafka Streams API always writes aggregation results to result topics.  Those are
+usually compacted topics, which means that only the latest value for each key is pre‐
+served. In case the results of an aggregation window need to be updated as a result of
+a late event, Kafka Streams will simply write a new result for this aggregation window,
+which will effectively replace the previous result.
+Reprocessing
+The last important pattern is reprocessing events. There are two variants of this
+pattern:
+• We have an improved version of our stream processing application. We want to
+run the new version of the application on the same event stream as the old, pro‐
+duce a new stream of results that does not replace the first version, compare the
+results between the two versions, and at some point move clients to use the new
+results instead of the existing ones.
+400 | Chapter 14: Stream Processing
+
+=== PAGE 430 ===
+• The existing stream processing app is buggy. We fix the bug, and we want to
+reprocess the event stream and recalculate our results
+The first use case is made simple by the fact that Apache Kafka stores the event
+streams in their entirety for long periods of time in a scalable data store. This means
+that having two versions of a stream processing application writing two result streams
+only requires the following:
+• Spinning up the new version of the application as a new consumer group
+• Configuring the new version to start processing from the first offset of the input
+topics (so it will get its own copy of all events in the input streams)
+• Letting the new application continue processing, and switching the client appli‐
+cations to the new result stream when the new version of the processing job has
+caught up
+The second use case is more challenging—it requires “resetting” an existing app to
+start processing back at the beginning of the input streams, resetting the local state
+(so we won’t mix results from the two versions of the app), and possibly cleaning the
+previous output stream. While Kafka Streams has a tool for resetting the state for a
+stream processing app, our recommendation is to try to use the first method when‐
+ever sufficient capacity exists to run two copies of the app and generate two result
+streams. The first method is much safer—it allows switching back and forth between
+multiple versions and comparing results between versions, and doesn’t risk losing
+critical data or introducing errors during the cleanup process.
+Interactive Queries
+As discussed previously, stream processing applications have state, and this state can
+be distributed among many instances of the application. Most of the time the users of
+stream processing applications get the results of the processing by reading them from
+an output topic. In some cases, however, it is desirable to take a shortcut and read the
+results from the state store itself. This is common when the result is a table (e.g., the
+top 10 best-selling books) and the stream of results is really a stream of updates to
+this table—it is much faster and easier to just read the table directly from the stream
+processing application state.
+Kafka Streams includes flexible APIs for querying the state of a stream processing
+application.
+Stream Processing Design Patterns | 401
+
+=== PAGE 431 ===
+Kafka Streams by Example
+To demonstrate how these patterns are implemented in practice, we’ll show a few
+examples using the Apache Kafka Streams API. We are using this specific API
+because it is relatively simple to use and it ships with Apache Kafka, which we already
+have access to. It is important to remember that the patterns can be implemented in
+any stream processing framework and library—the patterns are universal, but the
+examples are specific.
+Apache Kafka has two stream APIs—a low-level Processor API and a high-level
+Streams DSL. We will use the Kafka Streams DSL in our examples. The DSL allows us
+to define the stream processing application by defining a chain of transformations to
+events in the streams. Transformations can be as simple as a filter or as complex as a
+stream-to-stream join. The lower-level API allows us to create our own transforma‐
+tions. To learn more about the low-level Processor API, the developer guide  has
+detailed information, and the presentation “Beyond the DSL ” is a great introduction.
+An application that uses the DSL API always starts with using the StreamsBuilder to
+create a processing topology—a directed acyclic graph (DAG) of transformations that
+are applied to the events in the streams. Then we create a KafkaStreams execution
+object from the topology. Starting the KafkaStreams object will start multiple threads,
+each applying the processing topology to events in the stream. The processing will
+conclude when we close the KafkaStreams object.
+We’ll look at a few examples that use Kafka Streams to implement some of the design
+patterns we just discussed. A simple word count example will be used to demonstrate
+the map/filter pattern and simple aggregates. Then we’ll move to an example where
+we calculate different statistics on stock market trades, which will allow us to demon‐
+strate window aggregations. Finally, we’ll use ClickStream enrichment as an example
+to demonstrate streaming joins.
+Word Count
+Let’s walk through an abbreviated word count example for Kafka Streams. Y ou can
+find the full example on GitHub.
+The first thing you do when creating a stream processing app is configure Kafka
+Streams. Kafka Streams has a large number of possible configurations, which we
+won’t discuss here, but you can find them in the documentation. In addition, you can
+configure the producer and consumer embedded in Kafka Streams by adding any
+producer or consumer config to the Properties object:
+402 | Chapter 14: Stream Processing
+
+=== PAGE 432 ===
+public class WordCountExample {
+    public static void main(String[] args) throws Exception{
+        Properties props = new Properties();
+        props.put(StreamsConfig.APPLICATION_ID_CONFIG,
+          "wordcount"); 
+        props.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG,
+          "localhost:9092"); 
+        props.put(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG,
+          Serdes.String().getClass().getName()); 
+        props.put(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG,
+          Serdes.String().getClass().getName());
+Every Kafka Streams application must have an application ID. It is used to coor‐
+dinate the instances of the application and also when naming the internal local
+stores and the topics related to them. This name must be unique for each Kafka
+Streams application working with the same Kafka cluster.
+The Kafka Streams application always reads data from Kafka topics and writes its
+output to Kafka topics. As we’ll discuss later, Kafka Streams applications also use
+Kafka for coordination. So we had better tell our app where to find Kafka.
+When reading and writing data, our app will need to serialize and deserialize, so
+we provide default Serde classes. If needed, we can override these defaults later
+when building the streams topology.
+Now that we have the configuration, let’s build our streams topology:
+StreamsBuilder builder = new StreamsBuilder(); 
+KStream<String, String> source =
+  builder.stream("wordcount-input");
+final Pattern pattern = Pattern.compile("\\W+");
+KStream<String, String> counts  = source.flatMapValues(value->
+  Arrays.asList(pattern.split(value.toLowerCase()))) 
+        .map((key, value) -> new KeyValue<String,
+           String>(value, value))
+        .filter((key, value) -> (!value.equals("the"))) 
+        .groupByKey() 
+        .count().mapValues(value->
+           Long.toString(value)).toStream();
+counts.to("wordcount-output"); 
+We create a StreamsBuilder object and start defining a stream by pointing at the
+topic we’ll use as our input.
+Kafka Streams by Example | 403
+
+=== PAGE 433 ===
+Each event we read from the source topic is a line of words; we split it up using a
+regular expression into a series of individual words. Then we take each word
+(currently a value of the event record) and put it in the event record key so it can

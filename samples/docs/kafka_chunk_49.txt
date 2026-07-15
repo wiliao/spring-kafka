@@ -1,0 +1,200 @@
+
+=== PAGE 279 ===
+between the two clusters in active-active mode if topics are mirrored from NYC
+to LON as well as LON to NYC. The distinction between local and remote topics
+also supports aggregation use cases since consumers may choose subscription
+patterns to consume data produced from just the local region or subscribe to top‐
+ics from all regions to get the complete dataset.
+MirrorMaker periodically checks for new topics in the source cluster and starts
+mirroring these topics automatically if they match the configured patterns. If
+more partitions are added to the source topic, the same number of partitions is
+automatically added to the target topic, ensuring that events in the source topic
+appear in the same partitions in the same order in the target topic.
+Consumer offset migration
+MirrorMaker contains a utility class RemoteClusterUtils to enable consumers
+to seek to the last checkpointed offset in a DR cluster with offset translation when
+failing over from a primary cluster. Support for periodic migration of consumer
+offsets was added in 2.7.0 to automatically commit translated offsets to the target
+__consumer_offsets topic so that consumers switching to a DR cluster can
+restart from where they left off in the primary cluster with no data loss and mini‐
+mal duplicate processing. Consumer groups for which offsets are migrated can be
+customized, and for added protection, MirrorMaker does not overwrite offsets if
+consumers on the target cluster are actively using the target consumer group,
+thus avoiding any accidental conflicts.
+Topic configuration and ACL migration
+In addition to mirroring data records, MirrorMaker may be configured to mirror
+topic configuration and access control lists (ACLs) of the topics to retain the
+same behavior for the mirrored topic. The default configuration enables this
+migration with reasonable periodic refresh intervals that may be sufficient in
+most cases. Most of the topic configuration settings from the source are applied
+to the target topic, but a few like min.insync.replicas are not applied by
+default. The list of excluded configs can be customized.
+Only literal topic ACLs that match topics being mirrored are migrated, so if you
+are using prefixed or wildcard ACLs or alternative authorization mechanisms,
+you will need to configure those on the target cluster explicitly. ACLs for
+Topic:Write are not migrated to ensure that only MirrorMaker is allowed to
+write to the target topic. Appropriate access must be explicitly granted at the time
+of failover to ensure that applications work with the secondary cluster.
+Connector tasks
+The configuration option tasks.max limits the maximum number of tasks that
+the connector associated with MirrorMaker may use. The default is 1, but a
+250 | Chapter 10: Cross-Cluster Data Mirroring
+
+=== PAGE 280 ===
+minimum of 2 is recommended. When replicating a lot of topic partitions, higher
+values should be used if possible to increase parallelism.
+Configuration prefixes
+MirrorMaker supports customization of configuration options for all its compo‐
+nents, including connectors, producers, consumers, and admin clients. Kafka
+Connect and connector configs can be specified without any prefix. But since
+MirrorMaker configuration can include configuration for multiple clusters, pre‐
+fixes can be used to specify cluster-specific configs or configs for a particular rep‐
+lication flow. As we saw in the example earlier, clusters are identified using aliases
+that are used as a configuration prefix for options related to that cluster. Prefixes
+can be used to build a hierarchical configuration, with the more specific prefixed
+configuration having higher precedence than the less specific or nonprefixed
+configuration. MirrorMaker uses the following prefixes:
+• {cluster}.{connector_config}
+• {cluster}.admin.{admin_config}
+• {source_cluster}.consumer.{consumer_config}
+• {target_cluster}.producer.{producer_config}
+• {source_cluster}->{target_cluster}.{replication_flow_config}
+Multicluster Replication Topology
+We have seen an example configuration for a simple active-standby replication flow
+for MirrorMaker. Now let’s look at extending the configuration to support other com‐
+mon architectural patterns.
+Active-active topology between New Y ork and London can be configured by enabling
+replication flow in both directions. In this case, even though all topics from NYC are
+mirrored to LON and vice versa, MirrorMaker ensures that the same event isn’t con‐
+stantly mirrored back and forth between the pair of clusters since remote topics use
+the cluster alias as the prefix. It is good practice to use the same configuration file that
+contains the full replication topology for different MirrorMaker processes since it
+avoids conflicts when configs are shared using the internal configs topic in the target
+datacenter. MirrorMaker processes can be started in the target datacenter using the
+shared configuration file by specifying the target cluster when starting the Mirror‐
+Maker process using the --clusters option:
+clusters = NYC, LON
+NYC.bootstrap.servers = kafka.nyc.example.com:9092
+LON.bootstrap.servers = kafka.lon.example.com:9092
+NYC->LON.enabled = true                             
+NYC->LON.topics = .*                                
+LON->NYC.enabled = true                             
+LON->NYC.topics = .*                                
+Apache Kafka’s MirrorMaker | 251
+
+=== PAGE 281 ===
+Enable replication from New Y ork to London.
+Specify topics that are replicated from New Y ork to London.
+Enable replication from London to New Y ork.
+Specify topics that are replicated from London to New Y ork.
+More replication flows with additional source or target clusters can also be added to
+the topology. For example, we can extend the configuration to support the fan out
+from NYC to SF and LON by adding a new replication flow for SF:
+clusters = NYC, LON, SF
+SF.bootstrap.servers = kafka.sf.example.com:9092
+NYC->SF.enabled = true
+NYC->SF.topics = .*
+Securing MirrorMaker
+For production clusters, it is important to ensure that all cross-datacenter traffic is
+secure. Options for securing Kafka clusters are described in Chapter 11. MirrorMaker
+must be configured to use a secure broker listener in both source and target clusters,
+and client-side security options for each cluster must be configured for MirrorMaker
+to enable it to establish authenticated connections. SSL should be used to encrypt all
+cross-datacenter traffic. For example, the following configuration may be used to
+configure credentials for MirrorMaker:
+NYC.security.protocol=SASL_SSL             
+NYC.sasl.mechanism=PLAIN
+NYC.sasl.jaas.config=org.apache.kafka.common.security.plain.PlainLoginModule \
+    required username="MirrorMaker" password="MirrorMaker-password";     
+Security protocol should match that of the broker listener corresponding to the
+bootstrap servers specified for the cluster. SSL or SASL_SSL is recommended.
+Credentials for MirrorMaker are specified here using JAAS configuration since
+SASL is used. For SSL, keystores should be specified if mutual client authentica‐
+tion is enabled.
+The principal associated with MirrorMaker must also be granted appropriate permis‐
+sions on the source and target clusters if authorization is enabled on the clusters.
+ACLs must be granted for the MirrorMaker process for:
+• Topic:Read on the source cluster to consume from source topics; Topic:Create
+and Topic:Write on the target cluster to create and produce to target topics.
+252 | Chapter 10: Cross-Cluster Data Mirroring
+
+=== PAGE 282 ===
+• Topic:DescribeConfigs on the source cluster to obtain source topic configura‐
+tion; Topic:AlterConfigs on the target cluster to update target topic
+configuration.
+• Topic:Alter on the target cluster to add partitions if new source partitions are
+detected.
+• Group:Describe on the source cluster to obtain source consumer group meta‐
+data, including offsets; Group:Read on the target cluster to commit offsets for
+those groups in the target cluster.
+• Cluster:Describe on the source cluster to obtain source topic ACLs;
+Cluster:Alter on the target cluster to update the target topic ACLs.
+• Topic:Create and Topic:Write permissions for internal MirrorMaker topics in
+the source and target clusters.
+Deploying MirrorMaker in Production
+In the previous example, we started MirrorMaker in dedicated mode on the com‐
+mand line. Y ou can start any number of these processes to form a dedicated Mirror‐
+Maker cluster that is scalable and fault-tolerant. The processes mirroring to the same
+cluster will find each other and balance load between them automatically. Usually
+when running MirrorMaker in a production environment, you will want to run Mir‐
+rorMaker as a service, running in the background with nohup and redirecting its con‐
+sole output to a log file. The tool also has -daemon as a command-line option that
+should do that for you. Most companies that use MirrorMaker have their own startup
+scripts that also include the configuration parameters they use. Production deploy‐
+ment systems like Ansible, Puppet, Chef, and Salt are often used to automate deploy‐
+ment and manage the many configuration options. MirrorMaker may also be run
+inside a Docker container. MirrorMaker is completely stateless and doesn’t require
+any disk storage (all the data and state are stored in Kafka itself).
+Since MirrorMaker is based on Kafka Connect, all deployment modes of Connect can
+be used with MirrorMaker. Standalone mode may be used for development and test‐
+ing where MirrorMaker runs as a standalone Connect worker on a single machine.
+MirrorMaker may also be run as a connector in an existing distributed Connect clus‐
+ter by explicitly configuring the connectors. For production use, we recommend run‐
+ning MirrorMaker in distributed mode either as a dedicated MirrorMaker cluster or
+in a shared distributed Connect cluster.
+If at all possible, run MirrorMaker at the target datacenter. So, if you are sending data
+from NYC to SF , MirrorMaker should run in SF and consume data across the US
+from NYC. The reason for this is that long-distance networks can be a bit less reliable
+than those inside a datacenter. If there is a network partition and you lose connectiv‐
+ity between the datacenters, having a consumer that is unable to connect to a cluster
+Apache Kafka’s MirrorMaker | 253
+
+=== PAGE 283 ===
+is much safer than a producer that can’t connect. If the consumer can’t connect, it
+simply won’t be able to read events, but the events will still be stored in the source
+Kafka cluster and can remain there for a long time. There is no risk of losing events.
+On the other hand, if the events were already consumed and MirrorMaker can’t pro‐
+duce them due to network partition, there is always a risk that these events will acci‐
+dentally get lost by MirrorMaker. So, remote consuming is safer than remote
+producing.
+When do you have to consume locally and produce remotely?  The answer is when
+you need to encrypt the data while it is transferred between the datacenters but you
+don’t need to encrypt the data inside the datacenter. Consumers take a significant
+performance hit when connecting to Kafka with SSL encryption—much more so
+than producers. This is because use of SSL requires copying data for encryption,
+which means consumers no longer enjoy the performance benefits of the usual zero-
+copy optimization. And this performance hit also affects the Kafka brokers them‐
+selves. If your cross datacenter traffic requires encryption, but local traffic does not,
+then you may be better off placing MirrorMaker at the source datacenter, having it
+consume unencrypted data locally, and then producing it to the remote datacenter
+through an SSL encrypted connection. This way, the producer connects to Kafka with
+SSL but not the consumer, which doesn’t impact performance as much. If you use this
+consume locally and produce remotely approach, make sure MirrorMaker’s Connect
+producer is configured to never lose events by configuring it with acks=all and a
+sufficient number of retries. Also, configure MirrorMaker to fail fast using
+errors.tolerance=none when it fails to send events, which is typically safer to do
+than to continue and risk data loss. Note that newer versions of Java have significantly
+increased SSL performance, so producing locally and consuming remotely may be a
+viable option even with encryption.
+Another case where we may need to produce remotely and consume locally is a
+hybrid scenario when mirroring from an on-premises cluster to a cloud cluster.
+Secure on-premises clusters are likely to be behind a firewall that doesn’t allow
+incoming connections from the cloud. Running MirrorMaker on premise allows all
+connections to be from on premises to the cloud.
+When deploying MirrorMaker in production, it is important to remember to monitor
+it as follows:
+Kafka Connect monitoring
+Kafka Connect provides a wide range of metrics to monitor different aspects like
+connector metrics to monitor connector status, source connector metrics to
+monitor throughout, and worker metrics to monitor rebalance delays. Connect
+also provides a REST API to view and manage connectors.

@@ -1,0 +1,200 @@
+In other use cases, the different clusters are interdependent, and the administrators
+need to continuously copy data between the clusters. In most databases, continuously
+copying data between database servers is called replication. Since we’ve used replica‐
+tion to describe movement of data between Kafka nodes that are part of the same
+cluster, we’ll call copying of data between Kafka clusters mirroring. Apache Kafka’s
+built-in cross-cluster replicator is called MirrorMaker.
+In this chapter, we will discuss cross-cluster mirroring of all or part of the data. We’ll
+start by discussing some of the common use cases for cross-cluster mirroring. Then
+we’ll show a few architectures that are used to implement these use cases and discuss
+the pros and cons of each architecture pattern. We’ll then discuss MirrorMaker itself
+and how to use it. We’ll share operational tips, including deployment and perfor‐
+mance tuning. We’ll finish by discussing a few alternatives to MirrorMaker.
+233
+
+=== PAGE 263 ===
+Use Cases of Cross-Cluster Mirroring
+The following is a list of examples of when cross-cluster mirroring would be used:
+Regional and central clusters
+In some cases, the company has one or more datacenters in different geographi‐
+cal regions, cities, or continents. Each datacenter has its own Kafka cluster.  Some
+applications can work just by communicating with the local cluster, but some
+applications require data from multiple datacenters (otherwise, you wouldn’t be
+looking at cross-datacenter replication solutions). There are many cases when
+this is a requirement, but the classic example is a company that modifies prices
+based on supply and demand. This company can have a datacenter in each city in
+which it has a presence, collects information about local supply and demand, and
+adjusts prices accordingly. All this information will then be mirrored to a central
+cluster where business analysts can run company-wide reports on its revenue.
+High availability (HA) and disaster recovery (DR)
+The applications run on just one Kafka cluster and don’t need data from other
+locations, but you are concerned about the possibility of the entire cluster
+becoming unavailable for some reason. For redundancy, you’ d like to have a sec‐
+ond Kafka cluster with all the data that exists in the first cluster, so in case of
+emergency you can direct your applications to the second cluster and continue as
+usual.
+Regulatory compliance
+Companies operating in different countries may need to use different configura‐
+tions and policies to conform to legal and regulatory requirements in each coun‐
+try. For instance, some datasets may be stored in separate clusters with strict
+access control, with subsets of data replicated to other clusters with wider access.
+To comply with regulatory policies that govern retention period in each region,
+datasets may be stored in clusters in different regions with different
+configurations.
+Cloud migrations
+Many companies these days run their business in both an on-premises datacenter
+and a cloud provider. Often, applications run on multiple regions of the cloud
+provider for redundancy, and sometimes multiple cloud providers are used. In
+these cases, there is often at least one Kafka cluster in each on-premises datacen‐
+ter and each cloud region. Those Kafka clusters are used by applications in each
+datacenter and region to transfer data efficiently between the datacenters. For
+example, if a new application is deployed in the cloud but requires some data that
+is updated by applications running in the on-premises datacenter and stored in
+an on-premises database, you can use Kafka Connect to capture database changes
+to the local Kafka cluster and then mirror these changes to the cloud Kafka
+234 | Chapter 10: Cross-Cluster Data Mirroring
+
+=== PAGE 264 ===
+cluster where the new application can use them. This helps control the costs of
+cross-datacenter traffic as well as improve governance and security of the traffic.
+Aggregation of data from edge clusters
+Several industries, including retail, telecommunications, transportation, and
+healthcare, generate data from small devices with limited connectivity.  An aggre‐
+gate cluster with high availability can be used to support analytics and other use
+cases for data from a large number of edge clusters. This reduces connectivity,
+availability, and durability requirements on low-footprint edge clusters, for
+example, in IoT use cases. A highly available aggregate cluster provides business
+continuity even when edge clusters are offline and simplifies the development of
+applications that don’t have to directly deal with a large number of edge clusters
+with unstable networks.
+Multicluster Architectures
+Now that we’ve seen a few use cases that require multiple Kafka clusters, let’s look at
+some common architectural patterns that we’ve successfully used when implementing
+these use cases. Before we go into the architectures, we’ll give a brief overview of the
+realities of cross-datacenter communications. The solutions we’ll discuss may seem
+overly complicated without understanding that they represent trade-offs in the face of
+specific network conditions.
+Some Realities of Cross-Datacenter Communication
+The following is a list of some things to consider when it comes to cross-datacenter 
+communication:
+High latencies
+Latency of communication between two Kafka clusters increases as the distance
+and the number of network hops between the two clusters increase.
+Limited bandwidth
+Wide area networks (W ANs) typically have far lower available bandwidth than
+what you’ll see inside a single datacenter, and the available bandwidth can vary
+from minute to minute. In addition, higher latencies make it more challenging to
+utilize all the available bandwidth.
+Higher costs
+Regardless of whether you are running Kafka on premise or in the cloud, there
+are higher costs to communicate between clusters. This is partly because the
+bandwidth is limited and adding bandwidth can be prohibitively expensive, and
+also because of the prices vendors charge for transferring data among datacen‐
+ters, regions, and clouds.
+Multicluster Architectures | 235
+
+=== PAGE 265 ===
+Apache Kafka’s brokers and clients were designed, developed, tested, and tuned, all
+within a single datacenter. We assumed low latency and high bandwidth between
+brokers and clients. This is apparent in the default timeouts and sizing of various buf‐
+fers. For this reason, it is not recommended (except in specific cases, which we’ll dis‐
+cuss later) to install some Kafka brokers in one datacenter and others in another
+datacenter.
+In most cases, it’s best to avoid producing data to a remote datacenter, and when you
+do, you need to account for higher latency and the potential for more network errors.
+Y ou can handle the errors by increasing the number of producer retries, and handle
+the higher latency by increasing the size of the buffers that hold records between
+attempts to send them.
+If we need any kind of replication between clusters, and we ruled out inter-broker
+communication and producer-broker communication, then we must allow for
+broker-consumer communication. Indeed, this is the safest form of cross-cluster
+communication because in the event of network partition that prevents a consumer
+from reading data, the records remain safe inside the Kafka brokers until communi‐
+cations resume and consumers can read them. There is no risk of accidental data loss
+due to network partitions. Still, because bandwidth is limited, if there are multiple
+applications in one datacenter that need to read data from Kafka brokers in another
+datacenter, we prefer to install a Kafka cluster in each datacenter and mirror the nec‐
+essary data between them once rather than have multiple applications consume the
+same data across the W AN.
+We’ll talk more about tuning Kafka for cross-datacenter communication, but the fol‐
+lowing principles will guide most of the architectures we’ll discuss next:
+• No less than one cluster per datacenter.
+• Replicate each event exactly once (barring retries due to errors) between each
+pair of datacenters.
+• When possible, consume from a remote datacenter rather than produce to a
+remote datacenter.
+Hub-and-Spoke Architecture
+This architecture is intended for the case where there are multiple local Kafka clusters
+and one central Kafka cluster. See Figure 10-1.
+236 | Chapter 10: Cross-Cluster Data Mirroring
+
+=== PAGE 266 ===
+Figure 10-1. The hub-and-spoke architecture
+There is also a simpler variation of this architecture with just two clusters: a leader
+and a follower. See Figure 10-2.
+Figure 10-2. A simpler version of the hub-and-spoke architecture
+This architecture is used when data is produced in multiple datacenters and some
+consumers need access to the entire dataset. The architecture also allows for applica‐
+tions in each datacenter to only process data local to that specific datacenter. But it
+does not give access to the entire dataset from every datacenter.
+The main benefit of this architecture is that data is always produced to the local data‐
+center and events from each datacenter are only mirrored once—to the central data‐
+center. Applications that process data from a single datacenter can be located at that
+datacenter. Applications that need to process data from multiple datacenters will be
+located at the central datacenter where all the events are mirrored. Because replica‐
+tion always goes in one direction and because each consumer always reads from the
+same cluster, this architecture is simple to deploy, configure, and monitor.
+The main drawback of this architecture is the direct result of its benefits and simplic‐
+ity. Processors in one regional datacenter can’t access data in another. To understand
+better why this is a limitation, let’s look at an example of this architecture.
+Suppose that we are a large bank and have branches in multiple cities.  Let’s say that
+we decide to store user profiles and their account history in a Kafka cluster in each
+city. We replicate all this information to a central cluster that is used to run the bank’s
+Multicluster Architectures | 237
+
+=== PAGE 267 ===
+business analytics. When users connect to the bank website or visit their local branch,
+they are routed to send events to their local cluster and read events from the same
+local cluster. However, suppose that a user visits a branch in a different city. Because
+the user information doesn’t exist in the city they are visiting, the branch will be
+forced to interact with a remote cluster (not recommended) or have no way to access
+the user’s information (really embarrassing). For this reason, use of this pattern is
+usually limited to only parts of the dataset that can be completely separated between
+regional datacenters.
+When implementing this architecture, for each regional datacenter you need at least
+one mirroring process on the central datacenter. This process will consume data from
+each remote regional cluster and produce it to the central cluster. If the same topic
+exists in multiple datacenters, you can write all the events from this topic to one topic
+with the same name in the central cluster, or write events from each datacenter to a
+separate topic.
+Active-Active Architecture
+This architecture is used when two or more datacenters share some or all of the data,
+and each datacenter is able to both produce and consume events. See Figure 10-3.
+Figure 10-3. The active-active architecture model
+The main benefit of this architecture is the ability to serve users from a nearby data‐
+center, which typically has performance benefits, without sacrificing functionality due
+to limited availability of data (as we’ve seen happen in the hub-and-spoke architec‐
+ture). A secondary benefit is redundancy and resilience. Since every datacenter has all
+the functionality, if one datacenter is unavailable, you can direct users to a remaining
+datacenter. This type of failover only requires network redirects of users, typically the
+easiest and most transparent type of failover.
+The main drawback of this architecture is the challenge in avoiding conflicts when
+data is read and updated asynchronously in multiple locations. This includes techni‐
+cal challenges in mirroring events—for example, how do we make sure the same
+event isn’t mirrored back and forth endlessly? But more importantly, maintaining
+data consistency between the two datacenters will be difficult. Here are few examples
+of the difficulties you will encounter:
+238 | Chapter 10: Cross-Cluster Data Mirroring
+
+=== PAGE 268 ===
+• If a user sends an event to one datacenter and reads events from another datacen‐
+ter, it is possible that the event they wrote hasn’t arrived at the second datacenter
+yet. To the user, it will look like they just added a book to their wish list and
+clicked on the wish list, but the book isn’t there. For this reason, when this archi‐
+tecture is used, developers usually find a way to “stick” each user to a specific
+datacenter and make sure they use the same cluster most of the time (unless they
+connect from a remote location or the datacenter becomes unavailable).
+• An event from one datacenter says the user ordered book A, and an event from
+more or less the same time at a second datacenter says that the same user ordered
+book B. After mirroring, both datacenters have both events and thus we can say
+that each datacenter has two conflicting events. Applications on both datacenters

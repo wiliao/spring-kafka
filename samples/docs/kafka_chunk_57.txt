@@ -1,0 +1,200 @@
+AlterConfigs
+• Permission type: Allow|Deny; Deny has higher precedence.
+• Principal: Kafka principal represented as <principalType>:<principalName>, e.g.,
+User:Bob or Group:Sales. ACLs may use User:* to grant access to all users.
+• Host: Source IP address of the client connection or * if all hosts are authorized.
+For example, an ACL may specify:
+User:Alice has Allow permission for Write to Prefixed Topic:customer from 
+192.168.0.1
+AclAuthorizer authorizes an action if there are no Deny ACLs that match the action
+and there is at least one Allow ACL that matches the action. Describe permission is
+implicitly granted if Read, Write, Alter, or Delete permission is granted. Describe
+Configs permission is implicitly granted if AlterConfigs permission is granted.
+Wildcard ACLs
+ACLs with pattern type Literal and resource name * are used as
+wildcard ACLs that match all resource names of a resource type.
+292 | Chapter 11: Securing Kafka
+
+=== PAGE 322 ===
+Brokers must be granted Cluster:ClusterAction access in order to authorize con‐
+troller requests and replica fetch requests. Producers require Topic:Write for pro‐
+ducing to a topic. For idempotent produce without transactions, producers must also
+be granted Cluster:IdempotentWrite. Transactional producers require
+TransactionalId:Write access to the transaction IS and Group:Read for consumer
+groups to commit offsets. Consumers require Topic:Read to consume from a topic
+and Group:Read for the consumer group if using group management or offset man‐
+agement. Administrative operations require appropriate Create, Delete, Describe,
+Alter, DescribeConfigs, or AlterConfigs access. Table 11-1  shows the Kafka
+requests to which each ACL is applied.
+Table 11-1. Access granted for each Kafka ACL
+ACL Kafka requests Notes
+Cluster:ClusterAction Inter-broker requests, including controller requests
+and follower fetch requests for replication
+Should only be granted to
+brokers.
+Cluster:Create CreateTopics and auto-topic creation Use Topic:Create for fine-
+grained access control to create
+specific topics.
+Cluster:Alter CreateAcls, DeleteAcls, AlterReplica
+LogDirs, ElectReplicaLeader, AlterPar
+titionReassignments
+Cluster:AlterConfigs AlterConfigs and IncrementalAlterCon
+figs for broker and broker logger, AlterClient
+Quotas
+Cluster:Describe DescribeAcls, DescribeLogDirs,
+ListGroups, ListPartitionReassign
+ments, describing authorized operations for cluster
+in Metadata request
+Use Group:Describe for
+fine-grained access control for
+ListGroups.
+Cluster:DescribeConfigs DescribeConfigs for broker and broker logger,
+DescribeClientQuotas
+Cluster:IdempotentWrite Idempotent InitProducerId and Produce
+requests
+Only required for
+nontransactional idempotent
+producers.
+Topic:Create CreateTopics and auto-topic creation
+Topic:Delete DeleteTopics, DeleteRecords
+Topic:Alter CreatePartitions
+Topic:AlterConfigs AlterConfigs and IncrementalAlterCon
+figs for topics
+Topic:Describe Metadata request for topic, OffsetForLeaderE
+poch, ListOffset, OffsetFetch
+Topic:DescribeConfigs DescribeConfigs for topics, for returning
+configs in CreateTopics response
+Authorization | 293
+
+=== PAGE 323 ===
+ACL Kafka requests Notes
+Topic:Read Consumer Fetch, OffsetCommit, TxnOff
+setCommit, OffsetDelete
+Should be granted to
+consumers.
+Topic:Write Produce, AddPartitionToTxn Should be granted to
+producers.
+Group:Read JoinGroup, SyncGroup, LeaveGroup, Heart
+beat, OffsetCommit, AddOffsetsToTxn,
+TxnOffsetCommit
+Required for consumers using
+consumer group management
+or Kafka-based offset
+management. Also required for
+transactional producers to
+commit offsets within a
+transaction.
+Group:Describe FindCoordinator, DescribeGroup,
+ListGroups, OffsetFetch
+Group:Delete DeleteGroups, OffsetDelete
+TransactionalId:Write Produce and InitProducerId with
+transactions, AddPartitionToTxn, AddOff
+setsToTxn, TxnOffsetCommit, EndTxn
+Required for transactional
+producers.
+TransactionalId:
+Describe
+FindCoordinator for transaction coordinator
+DelegationToken:
+Describe
+DescribeTokens
+Kafka provides a tool for managing ACLs using the authorizer configured in brokers.
+ACLs can be created directly in ZooKeeper as well. This is useful to create broker
+ACLs prior to starting brokers:
+$ bin/kafka-acls.sh --add --cluster --operation ClusterAction \
+  --authorizer-properties zookeeper.connect=localhost:2181    \  
+  --allow-principal User:kafka
+$ bin/kafka-acls.sh --bootstrap-server localhost:9092       \
+  --command-config admin.props --add --topic customerOrders \ 
+  --producer --allow-principal User:Alice
+$ bin/kafka-acls.sh --bootstrap-server localhost:9092       \
+  --command-config admin.props --add --resource-pattern-type PREFIXED \ 
+  --topic customer --operation Read --allow-principal User:Bob
+ACLs for broker user are created directly in ZooKeeper.
+By default, the ACLs command grants literal ACLs. User:Alice is granted access
+to write to the topic customerOrders.
+The prefixed ACL grants permission for Bob to read all topics starting with
+customer.
+294 | Chapter 11: Securing Kafka
+
+=== PAGE 324 ===
+AclAuthorizer has two configuration options to grant broad access to resources or
+principals in order to simplify management of ACLs, especially when adding authori‐
+zation to existing clusters for the first time:
+super.users=User:Carol;User:Admin
+allow.everyone.if.no.acl.found=true
+Super users are granted access for all operations on all resources without any restric‐
+tions and cannot be denied access using Deny ACLs. If Carol’s credentials are compro‐
+mised, Carol must be removed from super.users, and brokers must be restarted to
+apply the changes. It is safer to grant specific access using ACLs to users in produc‐
+tion systems to ensure access can be revoked easily, if required.
+Super User Separator
+Unlike other list configurations in Kafka that are comma-
+separated, super.users are separated by a semicolon since user
+principals such as distinguished names from SSL certificates often
+contain commas.
+If allow.everyone.if.no.acl.found is enabled, all users are granted access to
+resources without any ACLs. This option may be useful when enabling authorization
+for the first time in a cluster or during development, but is not suitable for produc‐
+tion use since access may be granted unintentionally to new resources. Access may
+also be unexpectedly removed when ACLs for a matching prefix or wildcard are
+added if the condition for no.acl.found no longer applies.
+Customizing Authorization
+Authorization can be customized in Kafka to implement additional restrictions or
+add new types of access control, like role-based access control.
+The following custom authorizer restricts usage of some requests to the internal lis‐
+tener alone. For simplicity, the requests and listener name are hard-coded here, but
+they can be configured using custom authorizer properties instead for flexibility:
+public class CustomAuthorizer extends AclAuthorizer {
+  private static final Set<Short> internalOps =
+    Utils.mkSet(CREATE_ACLS.id, DELETE_ACLS.id);
+  private static final String internalListener = "INTERNAL";
+  @Override
+  public List<AuthorizationResult> authorize(
+          AuthorizableRequestContext context, List<Action> actions) {
+    if (!context.listenerName().equals(internalListener) && 
+        internalOps.contains((short) context.requestType()))
+      return Collections.nCopies(actions.size(), DENIED);
+    else
+Authorization | 295
+
+=== PAGE 325 ===
+      return super.authorize(context, actions);  
+  }
+}
+Authorizers are given the request context with metadata that includes listener
+names, security protocol, request types, etc., enabling custom authorizers to add
+or remove restrictions based on the context.
+We reuse functionality from the built-in Kafka authorizer using the public API.
+Kafka authorizer can also be integrated with external systems to support group-based
+access control or role-based access control. Different principal types can be used to
+create ACLs for group principals or role principals. For instance, roles and groups
+from an LDAP server can be used to periodically populate groups and roles in the
+Scala class below to support Allow ACLs at different levels:
+class RbacAuthorizer extends AclAuthorizer {
+  @volatile private var groups = Map.empty[KafkaPrincipal, Set[KafkaPrincipal]]
+    .withDefaultValue(Set.empty) 
+  @volatile private var roles = Map.empty[KafkaPrincipal, Set[KafkaPrincipal]]
+    .withDefaultValue(Set.empty) 
+  override def authorize(context: AuthorizableRequestContext,
+      actions: util.List[Action]): util.List[AuthorizationResult] = {
+    val principals = groups(context.principal) + context.principal
+    val allPrincipals = principals.flatMap(roles) ++ principals 
+    val contexts = allPrincipals.map(authorizeContext(context, _))
+    actions.asScala.map { action =>
+      val authorized = contexts.exists(
+        super.authorize(_, List(action).asJava).get(0) == ALLOWED)
+      if (authorized) ALLOWED else DENIED                       
+    }.asJava
+  }
+  private def authorizeContext(context: AuthorizableRequestContext,
+      contextPrincipal: KafkaPrincipal): AuthorizableRequestContext = {
+    new AuthorizableRequestContext {                            
+      override def principal() = contextPrincipal
+      override def clientId() = context.clientId
+      override def requestType() = context.requestType
+      override def requestVersion() = context.requestVersion
+      override def correlationId() = context.correlationId
+      override def securityProtocol() = context.securityProtocol
+      override def listenerName() = context.listenerName
+      override def clientAddress() = context.clientAddress

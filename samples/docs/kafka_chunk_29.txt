@@ -1,0 +1,200 @@
+fenced and will not be able to serve client requests. The new fenced state will prevent
+cases where a client produces events to a broker that is no longer a leader but is too
+out-of-date to be aware that it isn’t a leader.
+As part of the migration to the controller quorum, all operations that previously
+involved either clients or brokers communicating directly to ZooKeeper will be
+routed via the controller. This will allow seamless migration by replacing the control‐
+ler without having to change anything on any broker.
+Overall design of the new architecture is described in KIP-500. Details on how the
+Raft protocol was adapted for Kafka is described in KIP-595. Detailed design on the
+new controller quorum, including controller configuration and a new CLI for inter‐
+acting with cluster metadata, are found in KIP-631.
+Replication
+Replication is at the heart of Kafka’s architecture. Indeed, Kafka is often described as
+“a distributed, partitioned, replicated commit log service. ” Replication is critical
+because it is the way Kafka guarantees availability and durability when individual
+nodes inevitably fail.
+Replication | 139
+
+=== PAGE 169 ===
+As we’ve already discussed, data in Kafka is organized by topics. Each topic is parti‐
+tioned, and each partition can have multiple replicas. Those replicas are stored on
+brokers, and each broker typically stores hundreds or even thousands of replicas
+belonging to different topics and partitions.
+There are two types of replicas:
+Leader replica
+Each partition has a single replica designated as the leader. All produce requests
+go through the leader to guarantee consistency. Clients can consume from either
+the lead replica or its followers.
+Follower replica
+All replicas for a partition that are not leaders are called followers.  Unless config‐
+ured otherwise, followers don’t serve client requests; their main job is to replicate
+messages from the leader and stay up-to-date with the most recent messages the
+leader has. If a leader replica for a partition crashes, one of the follower replicas
+will be promoted to become the new leader for the partition.
+Read from Follower
+The ability to read from follower replicas was added in KIP-392. The main goal of this
+feature is to decrease network traffic costs by allowing clients to consume from the
+nearest in-sync replica rather than from the lead replica. To use this feature, con‐
+sumer configuration should include client.rack identifying the location of the cli‐
+ent. Broker configuration should include replica. selector.class . This
+configuration defaults to LeaderSelector (always consume from leader) but can be
+set to RackAwareReplicaSelector, which will select a replica that resides on a broker
+with a rack.id configuration that matches client.rack on the client. We can also
+implement our own replica selection logic by implementing the ReplicaSelector
+interface and using our own implementation instead.
+The replication protocol was extended to guarantee that only committed messages
+will be available when consuming from a follower replica. This means that we get the
+same reliability guarantees we always did, even when fetching from a follower. To
+provide this guarantee, all replicas need to know which messages were committed by
+the leader. To achieve this, the leader includes the current high-water mark (latest
+committed offset) in the data that it sends to the follower. The propagation of the
+high-water mark introduces a small delay, which means that data is available for con‐
+suming from the leader earlier than it is available on the follower. It is important to
+remember this additional delay, since it is tempting to attempt to decrease consumer
+latency by consuming from the leader replica.
+140 | Chapter 6: Kafka Internals
+
+=== PAGE 170 ===
+Another task the leader is responsible for is knowing which of the follower replicas is
+up-to-date with the leader. Followers attempt to stay up-to-date by replicating all the
+messages from the leader as the messages arrive, but they can fail to stay in sync for
+various reasons, such as when network congestion slows down replication or when a
+broker crashes and all replicas on that broker start falling behind until we start the
+broker and they can start replicating again.
+To stay in sync with the leader, the replicas send the leader Fetch requests, the exact
+same type of requests that consumers send in order to consume messages. In
+response to those requests, the leader sends the messages to the replicas. Those Fetch
+requests contain the offset of the message that the replica wants to receive next, and
+will always be in order. This means that the leader can know that a replica got all mes‐
+sages up to the last messages that the replica fetched, and none of the messages that
+came after. By looking at the last offset requested by each replica, the leader can tell
+how far behind each replica is. If a replica hasn’t requested a message in more than 10
+seconds, or if it has requested messages but hasn’t caught up to the most recent mes‐
+sage in more than 10 seconds, the replica is considered out of sync. If a replica fails to
+keep up with the leader, it can no longer become the new leader in the event of
+failure—after all, it does not contain all the messages.
+The inverse of this, replicas that are consistently asking for the latest messages are
+called in-sync replicas. Only in-sync replicas are eligible to be elected as partition lead‐
+ers in case the existing leader fails.
+The amount of time a follower can be inactive or behind before it is considered out of
+sync is controlled by the replica.lag.time.max.ms configuration parameter. This
+allowed lag has implications on client behavior and data retention during leader elec‐
+tion. We discuss this in depth in Chapter 7 when we discuss reliability guarantees.
+In addition to the current leader, each partition has a preferred leader—the replica
+that was the leader when the topic was originally created. It is preferred because when
+partitions are first created, the leaders are balanced among brokers. As a result, we
+expect that when the preferred leader is indeed the leader for all partitions in the clus‐
+ter, load will be evenly balanced between brokers. By default, Kafka is configured with
+auto.leader.rebalance.enable=true, which will check if the preferred leader rep‐
+lica is not the current leader but is in sync, and will trigger leader election to make the
+preferred leader the current leader.
+Replication | 141
+
+=== PAGE 171 ===
+Finding the Preferred Leaders
+The best way to identify the current preferred leader is by looking
+at the list of replicas for a partition. (Y ou can see details of parti‐
+tions and replicas in the output of the kafka-topics.sh tool. We’ll
+discuss this and other admin tools in Chapter 13.) The first replica
+in the list is always the preferred leader. This is true no matter who
+is the current leader and even if the replicas were reassigned to dif‐
+ferent brokers using the replica reassignment tool. In fact, if you
+manually reassign replicas, it is important to remember that the
+replica you specify first will be the preferred replica, so make sure
+you spread those around different brokers to avoid overloading
+some brokers with leaders while other brokers are not handling
+their fair share of the work.
+Request Processing
+Most of what a Kafka broker does is process requests sent to the partition leaders
+from clients, partition replicas, and the controller. Kafka has a binary protocol (over
+TCP) that specifies the format of the requests and how brokers respond to them—
+both when the request is processed successfully or when the broker encounters errors
+while processing the request.
+The Apache Kafka project includes Java clients that were implemented and main‐
+tained by contributors to the Apache Kafka project; there are also clients in other lan‐
+guages, such as C, Python, Go, and many others. Y ou can see the full list on the
+Apache Kafka website. They all communicate with Kafka brokers using this protocol.
+Clients always initiate connections and send requests, and the broker processes the
+requests and responds to them. All requests sent to the broker from a specific client
+will be processed in the order in which they were received—this guarantee is what
+allows Kafka to behave as a message queue and provide ordering guarantees on the
+messages it stores.
+All requests have a standard header that includes:
+• Request type (also called API key)
+• Request version (so the brokers can handle clients of different versions and
+respond accordingly)
+• Correlation ID: a number that uniquely identifies the request and also appears in
+the response and in the error logs (the ID is used for troubleshooting)
+• Client ID: used to identify the application that sent the request
+We will not describe the protocol here because it is described in significant detail in
+the Kafka documentation. However, it is helpful to take a look at how requests are
+142 | Chapter 6: Kafka Internals
+
+=== PAGE 172 ===
+processed by the broker—later, when we discuss how to monitor Kafka and the vari‐
+ous configuration options, you will have context about which queues and threads the
+metrics and configuration parameters refer to.
+For each port the broker listens on, the broker runs an acceptor thread that creates a
+connection and hands it over to a processor thread for handling. The number of pro‐
+cessor threads (also called network threads) is configurable. The network threads are
+responsible for taking requests from client connections, placing them in a request
+queue, and picking up responses from a response queue and sending them back to cli‐
+ents. At times, responses to clients have to be delays—consumers only receive respon‐
+ses when data is available, and admin clients receive a response to a DeleteTopic
+request after topic deletion is underway. The delayed responses are held in a purga‐
+tory until they can be completed. See Figure 6-1 for a visual of this process.
+Figure 6-1. Request processing inside Apache Kafka
+Once requests are placed on the request queue, I/O threads (also called request han‐
+dler threads) are responsible for picking them up and processing them.  The most
+common types of client requests are:
+Produce requests
+Sent by producers and contain messages the clients write to Kafka brokers
+Fetch requests
+Sent by consumers and follower replicas when they read messages from Kafka
+brokers
+Admin requests
+Sent by admin clients when performing metadata operations such as creating and
+deleting topics
+Both produce requests and fetch requests have to be sent to the leader replica of a
+partition. If a broker receives a produce request for a specific partition and the leader
+for this partition is on a different broker, the client that sent the produce request will
+get an error response of “Not a Leader for Partition. ” The same error will occur if a
+Request Processing | 143
+
+=== PAGE 173 ===
+fetch request for a specific partition arrives at a broker that does not have the leader
+for that partition. Kafka’s clients are responsible for sending produce and fetch
+requests to the broker that contains the leader for the relevant partition for the
+request.
+How do the clients know where to send the requests? Kafka clients use another
+request type called a metadata request, which includes a list of topics the client is
+interested in. The server response specifies which partitions exist in the topics, the
+replicas for each partition, and which replica is the leader. Metadata requests can be
+sent to any broker because all brokers have a metadata cache that contains this
+information.
+Clients typically cache this information and use it to direct produce and fetch
+requests to the correct broker for each partition. They also need to occasionally
+refresh this information (refresh intervals are controlled by the metadata.
+max.age.ms configuration parameter) by sending another metadata request so they
+know if the topic metadata changed—for example, if a new broker was added or some
+replicas were moved to a new broker ( Figure 6-2). In addition, if a client receives the
+“Not a Leader” error to one of its requests, it will refresh its metadata before trying to
+send the request again, since the error indicates that the client is using outdated infor‐
+mation and is sending requests to the wrong broker.
+Figure 6-2. Client routing requests
+Produce Requests
+As we saw in Chapter 3, a configuration parameter called acks is the number of brok‐
+ers that need to acknowledge receiving the message before it is considered a success‐
+ful write. Producers can be configured to consider messages as “written successfully”
+when the message was accepted by just the leader ( acks=1), or by all in-sync replicas
+(acks=all), or the moment the message was sent without waiting for the broker to
+accept it at all (acks=0).
+144 | Chapter 6: Kafka Internals
+
+=== PAGE 174 ===
+When the broker that contains the lead replica for a partition receives a produce
+request for this partition, it will start by running a few validations:
+• Does the user sending the data have write privileges on the topic?
+• Is the number of acks specified in the request valid (only 0, 1, and “all” are
+allowed)?

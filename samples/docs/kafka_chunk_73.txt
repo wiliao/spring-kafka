@@ -1,0 +1,200 @@
+id=node-BROKERID
+Coordinator kafka.consumer:type=consumer-coordinator-metrics,client-id=CLIENTID
+Fetch manager metrics
+In the consumer client, the overall consumer metric bean is less useful for us because
+the metrics of interest are located in the fetch manager beans instead. The overall con‐
+sumer bean has metrics regarding the lower-level network operations, but the fetch
+manager bean has metrics regarding bytes, request, and record rates. Unlike the pro‐
+ducer client, the metrics provided by the consumer are useful to look at but not useful
+for setting up alerts on.
+For the fetch manager, the one attribute you may want to set up monitoring and
+alerts for is fetch-latency-avg. As with the equivalent request-latency-avg in the
+producer client, this metric tells us how long fetch requests to the brokers take. The
+problem with alerting on this metric is that the latency is governed by the consumer
+configurations fetch.min.bytes and fetch.max.wait.ms. A slow topic will have
+Client Monitoring | 373
+
+=== PAGE 403 ===
+erratic latencies, as sometimes the broker will respond quickly (when there are mes‐
+sages available), and sometimes it will not respond for fetch.max.wait.ms (when
+there are no messages available). When consuming topics that have more regular, and
+abundant, message traffic, this metric may be more useful to look at.
+Wait! No Lag?
+The best advice for all consumers is that you must monitor the
+consumer lag. So why do we not recommend monitoring the
+records-lag-max attribute on the fetch manager bean? This metric
+shows the current lag (the difference between the consumer’s offset
+and the broker’s log-end offset) for the partition that is the most
+behind.
+The problem with this is twofold: it only shows the lag for one par‐
+tition, and it relies on proper functioning of the consumer. If you
+have no other option, use this attribute for lag and set up alerting
+for it. But the best practice is to use external lag monitoring, as will
+be described in “Lag Monitoring” on page 377.
+To know how much message traffic your consumer client is handling, you should
+capture the bytes-consumed-rate or the records-consumed-rate, or preferably
+both. These metrics describe the message traffic consumed by this client instance in
+bytes per second and messages per second, respectively. Some users set minimum
+thresholds on these metrics for alerting so that they are notified if the consumer is
+not doing enough work. Y ou should be careful when doing this, however. Kafka is
+intended to decouple the consumer and producer clients, allowing them to operate
+independently. The rate at which the consumer is able to consume messages is often
+dependent on whether or not the producer is working correctly, so monitoring these
+metrics on the consumer makes assumptions about the state of the producer. This
+can lead to false alerts on the consumer clients.
+It is also good to understand the relationship among bytes, messages, and requests,
+and the fetch manager provides metrics to help with this. The fetch-rate measure‐
+ment tells us the number of fetch requests per second that the consumer is perform‐
+ing. The fetch-size-avg metric gives the average size of those fetch requests in
+bytes. Finally, the records-per-request-avg metric gives us the average number of
+messages in each fetch request. Note that the consumer does not provide an equiva‐
+lent to the producer record-size-avg metric to let us know what the average size of
+a message is. If this is important, you will need to infer it from the other metrics avail‐
+able or capture it in your application after receiving messages from the consumer cli‐
+ent library.
+374 | Chapter 13: Monitoring Kafka
+
+=== PAGE 404 ===
+Per-broker and per-topic metrics
+The metrics that are provided by the consumer client for each of the broker connec‐
+tions and each of the topics being consumed, as with the producer client, are useful
+for debugging issues with consumption, but will probably not be measurements that
+you review daily. As with the fetch manager, the request-latency-avg attribute pro‐
+vided by the per-broker metrics bean has limited usefulness, depending on the
+message traffic in the topics you are consuming. The incoming-byte-rate and
+request-rate metrics break down the consumed message metrics provided by the
+fetch manager into per-broker bytes per second and requests per second measure‐
+ments, respectively. These can be used to help isolate problems that the consumer is
+having with the connection to a specific broker.
+Per-topic metrics provided by the consumer client are useful if more than one topic is
+being consumed. Otherwise, these metrics will be the same as the fetch manager’s
+metrics and redundant to collect. On the other end of the spectrum, if the client is
+consuming many topics (Kafka MirrorMaker, for example) these metrics will be diffi‐
+cult to review. If you plan on collecting them, the most important metrics to gather
+are the bytes-consumed-rate, the records-consumed-rate, and the fetch-size-
+avg. The bytes-consumed-rate shows the absolute size in bytes consumed per sec‐
+ond for the specific topic, while the records-consumed-rate shows the same
+information in terms of the number of messages. The fetch-size-avg provides the
+average size of each fetch request for the topic in bytes.
+Consumer coordinator metrics
+As described in Chapter 4, consumer clients generally work together as part of a con‐
+sumer group. This group has coordination activities, such as group members joining,
+and heartbeat messages to the brokers to maintain group membership. The consumer
+coordinator is the part of the consumer client that is responsible for handling this
+work, and it maintains its own set of metrics. As with all metrics, there are many
+numbers provided but only a few key ones that you should monitor regularly.
+The biggest problem that consumers can run into due to coordinator activities is a
+pause in consumption while the consumer group synchronizes. This is when the con‐
+sumer instances in a group negotiate which partitions will be consumed by which
+individual client instances. Depending on the number of partitions that are being
+consumed, this can take some time. The coordinator provides the metric attribute
+sync-time-avg, which is the average amount of time, in milliseconds, that the sync
+activity takes. It is also useful to capture the sync-rate attribute, which is the number
+of group syncs that happen every second. For a stable consumer group, this number
+should be zero most of the time.
+The consumer needs to commit offsets to checkpoint its progress in consuming mes‐
+sages, either automatically on a regular interval or by manual checkpoints triggered
+Client Monitoring | 375
+
+=== PAGE 405 ===
+in the application code. These commits are essentially just produce requests (though
+they have their own request type), in that the offset commit is a message produced to
+a special topic. The consumer coordinator provides the commit-latency-avg
+attribute, which measures the average amount of time that offset commits take. Y ou
+should monitor this value just as you would the request latency in the producer. It
+should be possible to establish a baseline expected value for this metric, and set rea‐
+sonable thresholds for alerting above that value.
+One final coordinator metric that can be useful to collect is assigned-partitions.
+This is a count of the number of partitions that the consumer client (as a single
+instance in the consumer group) has been assigned to consume. This is helpful
+because, when compared to this metric from other consumer clients in the group, it is
+possible to see the balance of load across the entire consumer group. We can use this
+to identify imbalances that might be caused by problems in the algorithm used by the
+consumer coordinator for distributing partitions to group members.
+Quotas
+Apache Kafka has the ability to throttle client requests in order to prevent one client
+from overwhelming the entire cluster. This is configurable for both producer and
+consumer clients and is expressed in terms of the permitted amount of traffic from an
+individual client ID to an individual broker in bytes per second. There is a broker
+configuration, which sets a default value for all clients, as well as per-client overrides
+that can be dynamically set. When the broker calculates that a client has exceeded its
+quota, it slows the client down by holding the response back to the client for enough
+time to keep the client under the quota.
+The Kafka broker does not use error codes in the response to indicate that the client
+is being throttled. This means that it is not obvious to the application that throttling
+is happening without monitoring the metrics that are provided to show the amount
+of time that the client is being throttled. The metrics that must be monitored are
+shown in Table 13-21.
+Table 13-21. Metrics to monitor
+Client Bean name
+Consumer bean kafka.consumer:type=consumer-fetch-manager-metrics,client-id=CLIENTID,
+attribute fetch-throttle-time-avg
+Producer bean kafka.producer:type=producer-metrics,client-id=CLIENTID, attribute produce-
+throttle-time-avg
+Quotas are not enabled by default on the Kafka brokers, but it is safe to monitor these
+metrics irrespective of whether or not you are currently using quotas. Monitoring
+376 | Chapter 13: Monitoring Kafka
+
+=== PAGE 406 ===
+them is a good practice as they may be enabled at some point in the future, and it’s
+easier to start with monitoring them as opposed to adding metrics later.
+Lag Monitoring
+For Kafka consumers, the most important thing to monitor is the consumer lag.
+Measured in number of messages, this is the difference between the last message pro‐
+duced in a specific partition and the last message processed by the consumer. While
+this topic would normally be covered in the previous section on consumer client
+monitoring, it is one of the cases where external monitoring far surpasses what is
+available from the client itself. As mentioned previously, there is a lag metric in the
+consumer client, but using it is problematic. It only represents a single partition, the
+one that has the most lag, so it does not accurately show how far behind the con‐
+sumer is. In addition, it requires proper operation of the consumer, because the met‐
+ric is calculated by the consumer on each fetch request. If the consumer is broken or
+offline, the metric is either inaccurate or not available.
+The preferred method of consumer lag monitoring is to have an external process that
+can watch both the state of the partition on the broker, tracking the offset of the most
+recently produced message, and the state of the consumer, tracking the last offset the
+consumer group has committed for the partition. This provides an objective view that
+can be updated regardless of the status of the consumer itself. This checking must be
+performed for every partition that the consumer group consumes. For a large con‐
+sumer, like MirrorMaker, this may mean tens of thousands of partitions.
+Chapter 12  provided information on using the command-line utilities to get con‐
+sumer group information, including committed offsets and lag. Monitoring lag like
+this, however, presents its own problems. First, you must understand for each parti‐
+tion what is a reasonable amount of lag. A topic that receives 100 messages an hour
+will need a different threshold than a topic that receives 100,000 messages per second.
+Then, you must be able to consume all of the lag metrics into a monitoring system
+and set alerts on them. If you have a consumer group that consumes 100,000 parti‐
+tions over 1,500 topics, you may find this to be a daunting task.
+One way to monitor consumer groups reduce this complexity is to use Burrow. This
+is an open source application, originally developed by LinkedIn, that provides con‐
+sumer status monitoring by gathering lag information for all consumer groups in a
+cluster and calculating a single status for each group saying whether the consumer
+group is working properly, falling behind, or is stalled or stopped entirely. It does this
+without requiring thresholds by monitoring the progress that the consumer group is
+making on processing messages, though you can also get the message lag as an abso‐
+lute number. There is an in-depth discussion of the reasoning and methodology
+behind how Burrow works on the LinkedIn Engineering blog. Deploying Burrow can
+be an easy way to provide monitoring for all consumers in a cluster, as well as in
+Lag Monitoring | 377
+
+=== PAGE 407 ===
+multiple clusters, and it can be easily integrated with your existing monitoring and
+alerting system.
+If there is no other option, the records-lag-max metric from the consumer client
+will provide at least a partial view of the consumer status. It is strongly suggested,
+however, that you utilize an external monitoring system like Burrow.
+End-to-End Monitoring
+Another type of external monitoring that is recommended to determine if your Kafka
+clusters are working properly is an end-to-end monitoring system that provides a cli‐
+ent point of view on the health of the Kafka cluster. Consumer and producer clients
+have metrics that can indicate that there might be a problem with the Kafka cluster,
+but this can be a guessing game as to whether increased latency is due to a problem
+with the client, the network, or Kafka itself. In addition, it means that if you are
+responsible for running the Kafka cluster, and not the clients, you would now have to
+monitor all of the clients as well. What you really need to know is:
+• Can I produce messages to the Kafka cluster?
+• Can I consume messages from the Kafka cluster?
+In an ideal world, you would be able to monitor this for every topic individually.
+However, in most situations it is not reasonable to inject synthetic traffic into every
+topic in order to do this. We can, however, at least provide those answers for every
+broker in the cluster, and that is what Xinfra Monitor (formerly known as Kafka

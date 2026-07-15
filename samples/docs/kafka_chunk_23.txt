@@ -1,0 +1,200 @@
+serialization errors.
+We will start by quickly showing how to write a custom deserializer, even though this
+is the less common method, and then we will move on to an example of how to use
+Avro to deserialize message keys and values.
+Custom Deserializers
+Let’s take the same custom object we serialized in Chapter 3 and write a deserializer
+for it:
+public class Customer {
+    private int customerID;
+    private String customerName;
+    public Customer(int ID, String name) {
+        this.customerID = ID;
+        this.customerName = name;
+    }
+    public int getID() {
+        return customerID;
+    }
+    public String getName() {
+        return customerName;
+    }
+}
+The custom deserializer will look as follows:
+import org.apache.kafka.common.errors.SerializationException;
+import java.nio.ByteBuffer;
+import java.util.Map;
+public class CustomerDeserializer implements Deserializer<Customer> { 
+Deserializers | 107
+
+=== PAGE 137 ===
+    @Override
+    public void configure(Map configs, boolean isKey) {
+        // nothing to configure
+    }
+    @Override
+    public Customer deserialize(String topic, byte[] data) {
+        int id;
+        int nameSize;
+        String name;
+        try {
+            if (data == null)
+                return null;
+            if (data.length < 8)
+                throw new SerializationException("Size of data received " +
+                    "by deserializer is shorter than expected");
+            ByteBuffer buffer = ByteBuffer.wrap(data);
+            id = buffer.getInt();
+            nameSize = buffer.getInt();
+            byte[] nameBytes = new byte[nameSize];
+            buffer.get(nameBytes);
+            name = new String(nameBytes, "UTF-8");
+            return new Customer(id, name); 
+        } catch (Exception e) {
+           throw new SerializationException("Error when deserializing " +   
+         "byte[] to Customer " + e);
+        }
+    }
+    @Override
+    public void close() {
+        // nothing to close
+    }
+}
+The consumer also needs the implementation of the Customer class, and both the
+class and the serializer need to match on the producing and consuming applica‐
+tions. In a large organization with many consumers and producers sharing access
+to the data, this can become challenging.
+We are just reversing the logic of the serializer here—we get the customer ID and
+name out of the byte array and use them to construct the object we need.
+108 | Chapter 4: Kafka Consumers: Reading Data from Kafka
+
+=== PAGE 138 ===
+The consumer code that uses this deserializer will look similar to this example:
+Duration timeout = Duration.ofMillis(100);
+Properties props = new Properties();
+props.put("bootstrap.servers", "broker1:9092,broker2:9092");
+props.put("group.id", "CountryCounter");
+props.put("key.deserializer",
+    "org.apache.kafka.common.serialization.StringDeserializer");
+props.put("value.deserializer",
+    CustomerDeserializer.class.getName());
+KafkaConsumer<String, Customer> consumer =
+    new KafkaConsumer<>(props);
+consumer.subscribe(Collections.singletonList("customerCountries"))
+while (true) {
+    ConsumerRecords<String, Customer> records = consumer.poll(timeout);
+    for (ConsumerRecord<String, Customer> record : records) {
+        System.out.println("current customer Id: " +
+            record.value().getID() + " and
+            current customer name: " +  record.value().getName());
+    }
+    consumer.commitSync();
+}
+Again, it is important to note that implementing a custom serializer and deserializer
+is not recommended. It tightly couples producers and consumers and is fragile and
+error prone. A better solution would be to use a standard message format, such as
+JSON, Thrift, Protobuf, or Avro. We’ll now see how to use Avro deserializers with the
+Kafka consumer. For background on Apache Avro, its schemas, and schema-
+compatibility capabilities, refer back to Chapter 3.
+Using Avro Deserialization with Kafka Consumer
+Let’s assume we are using the implementation of the Customer class in Avro that was
+shown in Chapter 3 . In order to consume those objects from Kafka, you want to
+implement a consuming application similar to this:
+Duration timeout = Duration.ofMillis(100);
+Properties props = new Properties();
+props.put("bootstrap.servers", "broker1:9092,broker2:9092");
+props.put("group.id", "CountryCounter");
+props.put("key.deserializer",
+    "org.apache.kafka.common.serialization.StringDeserializer");
+props.put("value.deserializer",
+    "io.confluent.kafka.serializers.KafkaAvroDeserializer"); 
+props.put("specific.avro.reader","true");
+props.put("schema.registry.url", schemaUrl); 
+String topic = "customerContacts"
+Deserializers | 109
+
+=== PAGE 139 ===
+KafkaConsumer<String, Customer> consumer = new KafkaConsumer<>(props);
+consumer.subscribe(Collections.singletonList(topic));
+System.out.println("Reading topic:" + topic);
+while (true) {
+    ConsumerRecords<String, Customer> records = consumer.poll(timeout); 
+    for (ConsumerRecord<String, Customer> record: records) {
+        System.out.println("Current customer name is: " +
+            record.value().getName()); 
+    }
+    consumer.commitSync();
+}
+We use KafkaAvroDeserializer to deserialize the Avro messages.
+schema.registry.url is a new parameter. This simply points to where we store
+the schemas. This way, the consumer can use the schema that was registered by
+the producer to deserialize the message.
+We specify the generated class, Customer, as the type for the record value.
+record.value() is a Customer instance, and we can use it accordingly.
+Standalone Consumer: Why and How to Use a Consumer
+Without a Group
+So far, we have discussed consumer groups, which are where partitions are assigned
+automatically to consumers and are rebalanced automatically when consumers are
+added or removed from the group. Typically, this behavior is just what you want, but
+in some cases you want something much simpler. Sometimes you know you have a
+single consumer that always needs to read data from all the partitions in a topic, or
+from a specific partition in a topic. In this case, there is no reason for groups or reba‐
+lances—just assign the consumer-specific topic and/or partitions, consume messages,
+and commit offsets on occasion (although you still need to configure group.id to
+commit offsets, without calling subscribe the consumer won’t join any group).
+When you know exactly which partitions the consumer should read, you don’t sub‐
+scribe to a topic—instead, you assign yourself a few partitions. A consumer can either
+subscribe to topics (and be part of a consumer group) or assign itself partitions, but
+not both at the same time.
+Here is an example of how a consumer can assign itself all partitions of a specific
+topic and consume from them:
+110 | Chapter 4: Kafka Consumers: Reading Data from Kafka
+
+=== PAGE 140 ===
+Duration timeout = Duration.ofMillis(100);
+List<PartitionInfo> partitionInfos = null;
+partitionInfos = consumer.partitionsFor("topic"); 
+if (partitionInfos != null) {
+    for (PartitionInfo partition : partitionInfos)
+        partitions.add(new TopicPartition(partition.topic(),
+            partition.partition()));
+    consumer.assign(partitions); 
+    while (true) {
+        ConsumerRecords<String, String> records = consumer.poll(timeout);
+        for (ConsumerRecord<String, String> record: records) {
+            System.out.printf("topic = %s, partition = %s, offset = %d,
+                customer = %s, country = %s\n",
+                record.topic(), record.partition(), record.offset(),
+                record.key(), record.value());
+        }
+        consumer.commitSync();
+    }
+}
+We start by asking the cluster for the partitions available in the topic. If you only
+plan on consuming a specific partition, you can skip this part.
+Once we know which partitions we want, we call assign() with the list.
+Other than the lack of rebalances and the need to manually find the partitions, every‐
+thing else is business as usual. Keep in mind that if someone adds new partitions to
+the topic, the consumer will not be notified. Y ou will need to handle this by checking
+consumer.partitionsFor() periodically or simply by bouncing the application
+whenever partitions are added.
+Summary
+We started this chapter with an in-depth explanation of Kafka’s consumer groups and
+the way they allow multiple consumers to share the work of reading events from top‐
+ics. We followed the theoretical discussion with a practical example of a consumer
+subscribing to a topic and continuously reading events. We then looked into the most
+important consumer configuration parameters and how they affect consumer behav‐
+ior. We dedicated a large part of the chapter to discussing offsets and how consumers
+keep track of them. Understanding how consumers commit offsets is critical when
+writing reliable consumers, so we took time to explain the different ways this can be
+done. We then discussed additional parts of the Consumer APIs, handling rebalances,
+and closing the consumer.
+Summary | 111
+
+=== PAGE 141 ===
+We concluded by discussing the deserializers used by consumers to turn bytes stored
+in Kafka into Java objects that the applications can process. We discussed Avro deser‐
+ializers in some detail, even though they are just one type of deserializer you can use,
+because these are most commonly used with Kafka.
+112 | Chapter 4: Kafka Consumers: Reading Data from Kafka
+
+=== PAGE 142 ===

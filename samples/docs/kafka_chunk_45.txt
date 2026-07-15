@@ -1,0 +1,200 @@
+returns a list of maps (i.e., a configuration for each task we want to run). The
+workers are then responsible for starting the tasks and giving each one its own
+unique configuration so that it will copy a unique subset of tables from the data‐
+base. Note that when you start the connector via the REST API, it may start on
+any node, and subsequently the tasks it starts may also execute on any node.
+Tasks
+Tasks are responsible for actually getting the data in and out of Kafka. All tasks
+are initialized by receiving a context from the worker. Source context includes an
+object that allows the source task to store the offsets of source records (e.g., in the
+file connector, the offsets are positions in the file; in the JDBC source connector,
+the offsets can be a timestamp column in a table). Context for the sink connector
+includes methods that allow the connector to control the records it receives from
+Kafka—this is used for things like applying back pressure and retrying and stor‐
+ing offsets externally for exactly-once delivery. After tasks are initialized, they are
+started with a Properties object that contains the configuration the Connector
+created for the task. Once tasks are started, source tasks poll an external system
+and return lists of records that the worker sends to Kafka brokers. Sink tasks
+receive records from Kafka through the worker and are responsible for writing
+the records to an external system.
+226 | Chapter 9: Building Data Pipelines
+
+=== PAGE 256 ===
+Workers
+Kafka Connect’s worker processes are the “container” processes that execute the con‐
+nectors and tasks. They are responsible for handling the HTTP requests that define
+connectors and their configuration, as well as for storing the connector configuration
+in an internal Kafka topic, starting the connectors and their tasks, and passing the
+appropriate configurations along. If a worker process is stopped or crashes, other
+workers in a Connect cluster will recognize that (using the heartbeats in Kafka’s con‐
+sumer protocol) and reassign the connectors and tasks that ran on that worker to the
+remaining workers. If a new worker joins a Connect cluster, other workers will notice
+that and assign connectors or tasks to it to make sure load is balanced among all
+workers fairly. Workers are also responsible for automatically committing offsets for
+both source and sink connectors into internal Kafka topics and for handling retries
+when tasks throw errors.
+The best way to understand workers is to realize that connectors and tasks are
+responsible for the “moving data” part of data integration, while the workers are
+responsible for the REST API, configuration management, reliability, high availabil‐
+ity, scaling, and load balancing.
+This separation of concerns is the main benefit of using the Connect API versus the
+classic consumer/producer APIs. Experienced developers know that writing code that
+reads data from Kafka and inserts it into a database takes maybe a day or two, but if
+you need to handle configuration, errors, REST APIs, monitoring, deployment, scal‐
+ing up and down, and handling failures, it can take a few months to get everything
+right. And most data integration pipelines involve more than just the one source or
+target. So now consider that effort spent on bespoke code for just a database integra‐
+tion, repeated many times for other technologies. If you implement data copying with
+a connector, your connector plugs into workers that handle a bunch of complicated
+operational issues that you don’t need to worry about.
+Converters and Connect’s data model
+The last piece of the Connect API puzzle is the connector data model and the con‐
+verters. Kafka’s Connect API includes a data API, which includes both data objects
+and a schema that describes that data. For example, the JDBC source reads a column
+from a database and constructs a Connect Schema object based on the data types of
+the columns returned by the database. It then uses the schema to construct a Struct
+that contains all the fields in the database record. For each column, we store the col‐
+umn name and the value in that column. Every source connector does something
+similar—read an event from the source system and generate a Schema and Value pair.
+Sink connectors do the opposite—get a Schema and Value pair and use the Schema to
+parse the values and insert them into the target system.
+Kafka Connect | 227
+
+=== PAGE 257 ===
+Though source connectors know how to generate objects based on the Data API,
+there is still a question of how Connect workers store these objects in Kafka. This is
+where the converters come in. When users configure the worker (or the connector),
+they choose which converter they want to use to store data in Kafka. At the moment,
+the available choices are primitive types, byte arrays, strings, Avro, JSON, JSON sche‐
+mas, or Protobufs. The JSON converter can be configured to either include a schema
+in the result record or not include one—so we can support both structured and semi‐
+structured data. When the connector returns a Data API record to the worker, the
+worker then uses the configured converter to convert the record to an Avro object, a
+JSON object, or a string, and the result is then stored into Kafka.
+The opposite process happens for sink connectors. When the Connect worker reads a
+record from Kafka, it uses the configured converter to convert the record from the
+format in Kafka (i.e., primitive types, byte arrays, strings, Avro, JSON, JSON schema,
+or Protobufs) to the Connect Data API record and then passes it to the sink connec‐
+tor, which inserts it into the destination system.
+This allows the Connect API to support different types of data stored in Kafka, inde‐
+pendent of the connector implementation (i.e., any connector can be used with any
+record type, as long as a converter is available).
+Offset management
+Offset management is one of the convenient services the workers perform for the
+connectors (in addition to deployment and configuration management via the REST
+API). The idea is that connectors need to know which data they have already pro‐
+cessed, and they can use APIs provided by Kafka to maintain information on which
+events were already processed.
+For source connectors, this means that the records the connector returns to the Con‐
+nect workers include a logical partition and a logical offset. Those are not Kafka par‐
+titions and Kafka offsets but rather partitions and offsets as needed in the source
+system. For example, in the file source, a partition can be a file and an offset can be a
+line number or character number in the file. In a JDBC source, a partition can be a
+database table and the offset can be an ID or timestamp of a record in the table. One
+of the most important design decisions involved in writing a source connector is
+deciding on a good way to partition the data in the source system and to track
+offsets—this will impact the level of parallelism the connector can achieve and
+whether it can deliver at-least-once or exactly-once semantics.
+When the source connector returns a list of records, which includes the source parti‐
+tion and offset for each record, the worker sends the records to Kafka brokers. If the
+brokers successfully acknowledge the records, the worker then stores the offsets of
+the records it sent to Kafka. This allows connectors to start processing events from
+the most recently stored offset after a restart or a crash. The storage mechanism is
+228 | Chapter 9: Building Data Pipelines
+
+=== PAGE 258 ===
+pluggable and is usually a Kafka topic; you can control the topic name with the
+offset.storage.topic configuration. In addition, Connect uses Kafka topics to
+store the configuration of all the connectors we’ve created and the status of each con‐
+nector—these use names configured by config.storage.topic and status.
+storage.topic, respectively.
+Sink connectors have an opposite but similar workflow: they read Kafka records,
+which already have a topic, partition, and offset identifiers. Then they call the
+connector put() method that should store those records in the destination system. If
+the connector reports success, they commit the offsets they’ve given to the connector
+back to Kafka, using the usual consumer commit methods.
+Offset tracking provided by the framework itself should make it easier for developers
+to write connectors and guarantee some level of consistent behavior when using dif‐
+ferent connectors.
+Alternatives to Kafka Connect
+So far we’ve looked at Kafka’s Connect API in great detail. While we love the conve‐
+nience and reliability the Connect API provides, it is not the only method for getting
+data in and out of Kafka. Let’s look at other alternatives and when they are commonly
+used.
+Ingest Frameworks for Other Datastores
+While we like to think that Kafka is the center of the universe, some people disagree.
+Some people build most of their data architectures around systems like Hadoop or
+Elasticsearch. Those systems have their own data ingestion tools—Flume for Hadoop,
+and Logstash or Fluentd for Elasticsearch. We recommend Kafka’s Connect API when
+Kafka is an integral part of the architecture and when the goal is to connect large
+numbers of sources and sinks. If you are actually building a Hadoop-centric or
+Elastic-centric system and Kafka is just one of many inputs into that system, then
+using Flume or Logstash makes sense.
+GUI-Based ETL Tools
+Old-school systems like Informatica, open source alternatives like Talend and Pen‐
+taho, and even newer alternatives such as Apache NiFi and StreamSets, support
+Apache Kafka as both a data source and a destination. If you are already using these
+systems—if you already do everything using Pentaho, for example—you may not be
+interested in adding another data integration system just for Kafka. They also make
+sense if you are using a GUI-based approach to building ETL pipelines. The main
+drawback of these systems is that they are usually built for involved workflows and
+will be a somewhat heavy and involved solution if all you want to do is get data in and
+Alternatives to Kafka Connect | 229
+
+=== PAGE 259 ===
+out of Kafka. We believe that data integration should focus on faithful delivery of
+messages under all conditions, while most ETL tools add unnecessary complexity.
+We do encourage you to look at Kafka as a platform that can handle data integration
+(with Connect), application integration (with producers and consumers), and stream
+processing. Kafka could be a viable replacement for an ETL tool that only integrates
+data stores.
+Stream Processing Frameworks
+Almost all stream processing frameworks include the ability to read events from
+Kafka and write them to a few other systems. If your destination system is supported
+and you already intend to use that stream processing framework to process events
+from Kafka, it seems reasonable to use the same framework for data integration as
+well. This often saves a step in the stream processing workflow (no need to store pro‐
+cessed events in Kafka—just read them out and write them to another system), with
+the drawback that it can be more difficult to troubleshoot things like lost and corrup‐
+ted messages.
+Summary
+In this chapter we discussed the use of Kafka for data integration. Starting with rea‐
+sons to use Kafka for data integration, we covered general considerations for data
+integration solutions. We showed why we think Kafka and its Connect API are a good
+fit. We then gave several examples of how to use Kafka Connect in different scenarios,
+spent some time looking at how Connect works, and then discussed a few alternatives
+to Kafka Connect.
+Whatever data integration solution you eventually land on, the most important fea‐
+ture will always be its ability to deliver all messages under all failure conditions. We
+believe that Kafka Connect is extremely reliable—based on its integration with Kafka’s
+tried-and-true reliability features—but it is important that you test the system of your
+choice, just like we do. Make sure your data integration system of choice can survive
+stopped processes, crashed machines, network delays, and high loads without missing
+a message. After all, at their heart, data integration systems only have one job—deliv‐
+ering those messages.
+Of course, while reliability is usually the most important requirement when integrat‐
+ing data systems, it is only one requirement. When choosing a data system, it is
+important to first review your requirements (refer to “Considerations When Building
+Data Pipelines” on page 204 for examples) and then make sure your system of choice
+satisfies them. But this isn’t enough—you must also learn your data integration solu‐
+tion well enough to be certain that you are using it in a way that supports your
+requirements. It isn’t enough that Kafka supports at-least-once semantics; you must
+230 | Chapter 9: Building Data Pipelines
+
+=== PAGE 260 ===
+be sure you aren’t accidentally configuring it in a way that may end up with less than
+complete reliability.
+Summary | 231
+
+=== PAGE 262 ===
+CHAPTER 10
+Cross-Cluster Data Mirroring
+For most of the book we discuss the setup, maintenance, and use of a single Kafka
+cluster. There are, however, a few scenarios in which an architecture may need more
+than one cluster.
+In some cases, the clusters are completely separated. They belong to different depart‐
+ments or different use cases, and there is no reason to copy data from one cluster to
+another. Sometimes, different SLAs or workloads make it difficult to tune a single
+cluster to serve multiple use cases. Other times, there are different security require‐
+ments. Those use cases are fairly easy—managing multiple distinct clusters is the
+same as running a single cluster multiple times.

@@ -1,0 +1,200 @@
+      Map<TopicPartition, OffsetAndMetadata> offsets = consumerOffsets();
+      producer.sendOffsetsToTransaction(offsets, consumer.groupMetadata()); 
+      producer.commitTransaction(); 
+    }
+  } catch (ProducerFencedException|InvalidProducerEpochException e) { 
+    throw new KafkaException(String.format(
+      "The transactional.id %s is used by another process", transactionalId));
+194 | Chapter 8: Exactly-Once Semantics
+
+=== PAGE 224 ===
+  } catch (KafkaException e) {
+    producer.abortTransaction(); 
+    resetToLastCommittedPositions(consumer);
+  }}
+Configuring a producer with transactional.id makes it a transactional pro‐
+ducer capable of producing atomic multipartition writes. The transactional ID
+must be unique and long-lived. Essentially it defines an instance of the
+application.
+Consumers that are part of the transactions don’t commit their own offsets—the
+producer writes offsets as part of the transaction. So offset commit should be
+disabled.
+In this example, the consumer reads from an input topic. We will assume that the
+records in the input topic were also written by a transactional producer (just for
+fun—there is no such requirement for the input). To read transactions cleanly
+(i.e., ignore in-flight and aborted transactions), we will set the consumer isolation
+level to read_committed. Note that the consumer will still read nontransactional
+writes, in addition to reading committed transactions.
+The first thing a transactional producer must do is initialize. This registers the
+transactional ID, bumps up the epoch to guarantee that other producers with the
+same ID will be considered zombies, and aborts older in-flight transactions from
+the same transactional ID.
+Here we are using the subscribe consumer API, which means that partitions
+assigned to this instance of the application can change at any point as a result of
+rebalance. Prior to release 2.5, which introduced API changes from KIP-447, this
+was much more challenging. Transactional producers had to be statically
+assigned a set of partitions, because the transaction fencing mechanism relied on
+the same transactional ID being used for the same partitions (there was no zom‐
+bie fencing protection if the transactional ID changed). KIP-447 added new APIs,
+used in this example, that attach consumer-group information to the transaction,
+and this information is used for fencing. When using this method, it also makes
+sense to commit transactions whenever the related partitions are revoked.
+We consumed records, and now we want to process them and produce results.
+This method guarantees that everything that is produced from the time it was
+called, until the transaction is either committed or aborted, is part of a single
+atomic transaction.
+This is where we process the records—all our business logic goes here.
+Transactions | 195
+
+=== PAGE 225 ===
+As we explained earlier in the chapter, it is important to commit the offsets as
+part of the transaction. This guarantees that if we fail to produce results, we won’t
+commit the offsets for records that were not, in fact, processed. This method
+commits offsets as part of the transaction. Note that it is important not to com‐
+mit offsets in any other way—disable offset auto-commit, and don’t call any of
+the consumer commit APIs. Committing offsets by any other method does not
+provide transactional guarantees.
+We produced everything we needed, we committed offsets as part of the transac‐
+tion, and it is time to commit the transaction and seal the deal. Once this method
+returns successfully, the entire transaction has made it through, and we can con‐
+tinue to read and process the next batch of events.
+If we got this exception, it means we are the zombie. Somehow our application
+froze or disconnected, and there is a newer instance of the app with our transac‐
+tional ID running. Most likely the transaction we started has already been abor‐
+ted and someone else is processing those records. Nothing to do but die
+gracefully.
+If we got an error while writing a transaction, we can abort the transaction, set
+the consumer position back, and try again.
+Transactional IDs and Fencing
+Choosing the transactional ID for producers is important and a bit more challenging
+than it seems. Assigning the transactional ID incorrectly can lead to either applica‐
+tion errors or loss of exactly-once guarantees. The key requirements are that the
+transactional ID will be consistent for the same instance of the application between
+restarts and is different for different instances of the application, otherwise the brok‐
+ers will not be able to fence off zombie instances.
+Until release 2.5, the only way to guarantee fencing was to statically map the transac‐
+tional ID to partitions. This guaranteed that each partition will always be consumed
+with the same transactional ID. If a producer with transactional ID A processed mes‐
+sages from topic T and lost connectivity, and the new producer that replaces it has
+transactional ID B, and later producer A comes back as a zombie, zombie A will not
+be fenced because the ID doesn’t match that of the new producer B. We want pro‐
+ducer A to always be replaced by producer A, and the new producer A will have a
+higher epoch number and zombie A will be properly fenced away. In those releases,
+the previous example would be incorrect—transactional IDs are assigned randomly
+to threads without making sure the same transactional ID is always used to write to
+the same partition.
+196 | Chapter 8: Exactly-Once Semantics
+
+=== PAGE 226 ===
+In Apache Kafka 2.5, KIP-447 introduced a second method of fencing based on con‐
+sumer group metadata for fencing in addition to transactional IDs. We use the pro‐
+ducer offset commit method and pass as an argument the consumer group metadata
+rather than just the consumer group ID.
+Let’s say that we have topic T1 with two partitions, t-0 and t-1. Each is consumed by a
+separate consumer in the same group; each consumer passes records to a matching
+transactional producer—one with transactional ID A and the other with transactional
+ID B; and they are writing output to topic T2 partitions 0 and 1, respectively.
+Figure 8-3 illustrates this scenario.
+Figure 8-3. Transactional record processor
+As illustrated in Figure 8-4, if the application instance with consumer A and producer
+A becomes a zombie, consumer B will start processing records from both partitions.
+If we want to guarantee that no zombies write to partition 0, consumer B can’t just
+start reading from partition 0 and writing to partition 0 with transactional ID B.
+Instead the application will need to instantiate a new producer, with transactional ID
+A, to safely write to partition 0 and fence the old transactional ID A. This is wasteful.
+Instead, we include the consumer group information in the transactions. Transac‐
+tions from producer B will show that they are from a newer generation of the
+consumer group, and therefore they will go through, while transactions from the
+now-zombie producer A will show an old generation of the consumer group and will
+be fenced.
+Figure 8-4. Transactional record processor after a rebalance
+Transactions | 197
+
+=== PAGE 227 ===
+How Transactions Work
+We can use transactions by calling the APIs without understanding how they work.
+But having some mental model of what is going on under the hood will help us trou‐
+bleshoot applications that do not behave as expected.
+The basic algorithm for transactions in Kafka was inspired by Chandy-Lamport snap‐
+shots, in which “marker” control messages are sent into communication channels,
+and consistent state is determined based on the arrival of the marker. Kafka transac‐
+tions use marker messages to indicate that transactions are committed or aborted
+across multiple partitions—when the producer decides to commit a transaction, it
+sends a “commit” message to the transaction coordinator, which then writes commit
+markers to all partitions involved in a transaction. But what happens if the producer
+crashes after only writing commit messages to a subset of the partitions? Kafka trans‐
+actions solve this by using two-phase commit and a transaction log. At a high level,
+the algorithm will:
+1. Log the existence of an ongoing transaction, including the partitions involved
+2. Log the intent to commit or abort—once this is logged, we are doomed to com‐
+mit or abort eventually
+3. Write all the transaction markers to all the partitions
+4. Log the completion of the transaction
+To implement this basic algorithm, Kafka needs a transaction log. We use an internal
+topic called __transaction_state.
+Let’s see how this algorithm works in practice by going through the inner workings of
+the transactional API calls we’ve used in the preceding code snippet.
+Before we begin the first transaction, producers need to register as transactional by
+calling initTransaction(). This request is sent to a broker that will be the transac‐
+tion coordinator for this transactional producer. Each broker is the transactional coor‐
+dinator for a subset of the producers, just like each broker is the consumer group
+coordinator for a subset of the consumer groups. The transaction coordinator for
+each transactional ID is the leader of the partition of the transaction log the transac‐
+tional ID is mapped to.
+The initTransaction() API registers a new transactional ID with the coordinator,
+or increments the epoch of an existing transactional ID in order to fence off previous
+producers that may have become zombies. When the epoch is incremented, pending
+transactions will be aborted.
+198 | Chapter 8: Exactly-Once Semantics
+
+=== PAGE 228 ===
+The next step for the producer is to call beginTransaction(). This API call isn’t part
+of the protocol—it simply tells the producer that there is now a transaction in pro‐
+gress. The transaction coordinator on the broker side is still unaware that the transac‐
+tion began. However, once the producer starts sending records, each time the
+producer detects that it is sending records to a new partition, it will also send Add
+PartitionsToTxnRequest to the broker informing it that there is a transaction in
+progress for this producer, and that additional partitions are part of the transaction.
+This information will be recorded in the transaction log.
+When we are done producing results and are ready to commit, we start by commit‐
+ting offsets for the records we’ve processed in this transaction. Committing offsets
+can be done at any time but must be done before the transaction is committed. Call‐
+ing sendOffsetsToTransaction() will send a request to the transaction coordinator
+that includes the offsets and also the consumer group ID. The transaction coordina‐
+tor will use the consumer group ID to find the group coordinator and commit the
+offsets as a consumer group normally would.
+Now it is time to commit—or abort. Calling commitTransaction() or abort
+Transaction() will send an EndTransactionRequest to the transaction coordinator.
+The transaction coordinator will log the commit or abort intention to the transaction
+log. Once this step is successful, it is the transaction coordinator’s responsibility to
+complete the commit (or abort) process. It writes a commit marker to all the parti‐
+tions involved in the transaction, then writes to the transaction log that the commit
+completed successfully. Note that if the transaction coordinator shuts down or
+crashes after logging the intention to commit and before completing the process, a
+new transaction coordinator will be elected, pick up the intent to commit from the
+transaction log, and complete the process.
+If a transaction is not committed or aborted within transaction.timeout.ms, the
+transaction coordinator will abort it automatically.
+Transactions | 199
+
+=== PAGE 229 ===
+Each broker that receives records from transactional or idempotent
+producers will store the producer/transactional IDs in memory,
+together with related state for each of the last five batches sent by
+the producer: sequence numbers, offsets, and such. This state is
+stored for transactional.id.expiration.ms milliseconds after
+the producer stopped being active (seven days by default). This
+allows the producer to resume activity without running into
+UNKNOWN_PRODUCER_ID errors. It is possible to cause something sim‐
+ilar to a memory leak in the broker by creating new idempotent
+producers or new transactional IDs at a very high rate but never
+reusing them. Three new idempotent producers per second, accu‐
+mulated over the course of a week, will result in 1.8 million pro‐
+ducer state entries with a total of 9 million batch metadata stored,
+using around 5 GB RAM. This can cause out-of-memory or severe
+garbage collection issues on the broker. We recommend architect‐
+ing the application to initialize a few long-lived producers when the
+application starts up, and then reuse them for the lifetime of
+the application. If this isn’t possible (Function as a Service makes
+this difficult), we recommend lowering transactional.id.
+expiration.ms so the IDs will expire faster, and therefore old state

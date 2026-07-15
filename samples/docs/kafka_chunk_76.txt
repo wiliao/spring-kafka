@@ -1,0 +1,200 @@
+they lag more—if the price increases, it will take longer to notice than with a
+smaller window. Kafka Streams also includes a session window, where the size of
+390 | Chapter 14: Stream Processing
+
+=== PAGE 420 ===
+the window is defined by a period of inactivity. The developer defines a session
+gap, and all events that arrive continuously with gaps smaller than the defined
+session gap belong to the same session. A gap in arrivals will define a new ses‐
+sion, and all events arriving after the gap, but before the next gap, will belong to
+the new session.
+How often the window moves (advance interval)
+Five-minute averages can update every minute, second, or every time there is a
+new event. Windows for which the size is a fixed time interval are called hopping
+windows. When the advance interval is equal to the window size, it is called a
+tumbling window.
+How long the window remains updatable (grace period)
+Our five-minute moving average calculated the average for the 00:00–00:05 win‐
+dow. Now, an hour later, we are getting a few more input records with their event
+time showing 00:02. Do we update the result for the 00:00–00:05 period? Or do
+we let bygones be bygones? Ideally, we’ll be able to define a certain time period
+during which events will get added to their respective time slice. For example, if
+the events were delayed up to four hours, we should recalculate the results and
+update. If events arrive later than that, we can ignore them.
+Windows can be aligned to clock time—i.e., a five-minute window that moves every
+minute will have the first slice as 00:00–00:05 and the second as 00:01–00:06. Or it
+can be unaligned and simply start whenever the app started, and then the first slice
+can be 03:17–03:22. See Figure 14-2  for the difference between these two types of
+windows.
+Figure 14-2. Tumbling window versus hopping window
+Stream Processing Concepts | 391
+
+=== PAGE 421 ===
+Processing Guarantees
+A key requirement for stream processing applications is the ability to process each
+record exactly once, regardless of failures. Without exactly-once guarantees, stream
+processing can’t be used in cases where accurate results are needed. As discussed in
+detail in Chapter 8 , Apache Kafka has support for exactly-once semantics with a
+transactional and idempotent producer. Kafka Streams uses Kafka’s transactions to
+implement exactly-once guarantees for stream processing applications. Every applica‐
+tion that uses the Kafka Streams library can enable exactly-once guarantees by setting
+processing.guarantee to exactly_once. Kafka Streams version 2.6 or later includes
+a more efficient exactly-once implementation that requires Kafka brokers of version
+2.5 or later. This efficient implementation can be enabled by setting processing.
+guarantee to exactly_once_beta.
+Stream Processing Design Patterns
+Every stream processing system is different—from the basic combination of a con‐
+sumer, processing logic, and producer, to involved clusters like Spark Streaming with
+its machine learning libraries, and much in between. But there are some basic design
+patterns, which are known solutions to common requirements of stream processing
+architectures. We’ll review a few of those well-known patterns and show how they are
+used with a few examples.
+Single-Event Processing
+The most basic pattern of stream processing is the processing of each event in isola‐
+tion. This is also known as a map/filter pattern because it is commonly used to filter
+unnecessary events from the stream or transform each event. (The term map is based
+on the map/reduce pattern in which the map stage transforms events and the reduce
+stage aggregates them.)
+In this pattern, the stream processing app consumes events from the stream, modifies
+each event, and then produces the events to another stream. An example is an app
+that reads log messages from a stream and writes ERROR events into a high-priority
+stream and the rest of the events into a low-priority stream. Another example is an
+application that reads events from a stream and modifies them from JSON to Avro.
+Such applications do not need to maintain state within the application because each
+event can be handled independently. This means that recovering from app failures or
+load-balancing is incredibly easy as there is no need to recover state; we can simply
+hand off the events to another instance of the app to process.
+392 | Chapter 14: Stream Processing
+
+=== PAGE 422 ===
+This pattern can be easily handled with a simple producer and consumer, as seen in
+Figure 14-3.
+Figure 14-3. Single-event processing topology
+Processing with Local State
+Most stream processing applications are concerned with aggregating information,
+especially window aggregation. An example of this is finding the minimum and max‐
+imum stock prices for each day of trading and calculating a moving average.
+These aggregations require maintaining a state. In our example, in order to calculate
+the minimum and average price each day, we need to store the minimum value, the
+sum, and the number of records we’ve seen up until the current time.
+All this can be done using local state (rather than a shared state) because each opera‐
+tion in our example is a group by aggregate. That is, we perform the aggregation per
+stock symbol, not on the entire stock market in general. We use a Kafka partitioner to
+make sure that all events with the same stock symbol are written to the same parti‐
+tion. Then, each instance of the application will get all the events from the partitions
+that are assigned to it (this is a Kafka consumer guarantee). This means that each
+instance of the application can maintain state for the subset of stock symbols that are
+written to the partitions that are assigned to it. See Figure 14-4.
+Stream Processing Design Patterns | 393
+
+=== PAGE 423 ===
+Figure 14-4. Topology for event processing with local state
+Stream processing applications become significantly more complicated when the
+application has local state. There are several issues a stream processing application
+must address:
+Memory usage
+The local state ideally fits into the memory available to the application instance.
+Some local stores allow spilling to disk, but this has significant performance
+impact.
+Persistence
+We need to make sure the state is not lost when an application instance shuts
+down and that the state can be recovered when the instance starts again or is
+replaced by a different instance. This is something that Kafka Streams handles
+very well—local state is stored in-memory using embedded RocksDB, which also
+persists the data to disk for quick recovery after restarts. But all the changes to
+the local state are also sent to a Kafka topic. If a stream’s node goes down, the
+local state is not lost—it can be easily re-created by rereading the events from the
+Kafka topic. For example, if the local state contains “current minimum for IBM =
+167.19, ” we store this in Kafka so that later we can repopulate the local cache
+from this data. Kafka uses log compaction for these topics to make sure they
+don’t grow endlessly and that re-creating the state is always feasible.
+394 | Chapter 14: Stream Processing
+
+=== PAGE 424 ===
+Rebalancing
+Partitions sometimes get reassigned to a different consumer. When this happens,
+the instance that loses the partition must store the last good state, and the
+instance that receives the partition must know to recover the correct state.
+Stream processing frameworks differ in how much they help the developer manage
+the local state they need. If our application requires maintaining local state, we make
+sure to check the framework and its guarantees. We’ll include a short comparison
+guide at the end of the chapter, but as we all know, software changes quickly and
+stream processing frameworks doubly so.
+Multiphase Processing/Repartitioning
+Local state is great if we need a group by type of aggregate. But what if we need a
+result that uses all available information? For example, suppose we want to publish
+the top 10 stocks each day—the 10 stocks that gained the most from opening to clos‐
+ing during each day of trading. Obviously, nothing we do locally on each application
+instance is enough because all the top 10 stocks could be in partitions assigned to
+other instances. What we need is a two-phase approach. First, we calculate the daily
+gain/loss for each stock symbol. We can do this on each instance with a local state.
+Then we write the results to a new topic with a single partition. This partition will be
+read by a single application instance that can then find the top 10 stocks for the day.
+The second topic, which contains just the daily summary for each stock symbol, is
+obviously much smaller with significantly less traffic than the topics that contain the
+trades themselves, and therefore it can be processed by a single instance of the appli‐
+cation. Sometimes more steps are needed to produce the result. See Figure 14-5.
+This type of multiphase processing is very familiar to those who write MapReduce
+code, where you often have to resort to multiple reduce phases. If you’ve ever written
+map-reduce code, you’ll remember that you needed a separate app for each reduce
+step. Unlike MapReduce, most stream processing frameworks allow including all
+steps in a single app, with the framework handling the details of which application
+instance (or worker) will run each step.
+Stream Processing Design Patterns | 395
+
+=== PAGE 425 ===
+Figure 14-5. Topology that includes both local state and repartitioning steps
+Processing with External Lookup: Stream-Table Join
+Sometimes stream processing requires integration with data external to the stream—
+validating transactions against a set of rules stored in a database or enriching click‐
+stream information with data about the users who clicked.
+The obvious idea on how to perform an external lookup for data enrichment is some‐
+thing like this: for every click event in the stream, look up the user in the profile data‐
+base and write an event that includes the original click, plus the user age and gender,
+to another topic. See Figure 14-6.
+Figure 14-6. Stream processing that includes an external data source
+The problem with this obvious idea is that an external lookup adds significant latency
+to the processing of every record—usually between 5 and 15 milliseconds. In many
+cases, this is not feasible. Often the additional load this places on the external data
+store is also not acceptable—stream processing systems can often handle 100K–500K
+396 | Chapter 14: Stream Processing
+
+=== PAGE 426 ===
+events per second, but the database can only handle perhaps 10K events per second at
+reasonable performance. There is also added complexity around availability—our
+application will need to handle situations when the external DB is not available.
+To get good performance and availability, we need to cache the information from the
+database in our stream processing application. Managing this cache can be challeng‐
+ing though—how do we prevent the information in the cache from getting stale? If
+we refresh events too often, we are still hammering the database, and the cache isn’t
+helping much. If we wait too long to get new events, we are doing stream processing
+with stale information.
+But if we can capture all the changes that happen to the database table in a stream of
+events, we can have our stream processing job listen to this stream and update the
+cache based on database change events. Capturing changes to the database as events
+in a stream is known as change data capture (CDC), and Kafka Connect has multiple
+connectors capable of performing CDC and converting database tables to a stream of
+change events. This allows us to keep our own private copy of the table and be noti‐
+fied whenever there is a database change event so we can update our own copy
+accordingly. See Figure 14-7.
+Figure 14-7. Topology joining a table and a stream of events, removing the need to
+involve an external data source in stream processing
+Then, when we get click events, we can look up the user_id at our local state and
+enrich the event. And because we are using a local state, this scales a lot better and
+will not affect the database and other apps using it.
+We refer to this as a stream-table join because one of the streams represents changes
+to a locally cached table.
+Stream Processing Design Patterns | 397
+
+=== PAGE 427 ===
+Table-Table Join
+In the previous section we discussed how a table and a stream of update events are
+equivalent. We’ve discussed in detail how this works when joining a stream and a
+table. There is no reason why we can’t have those materialized tables in both sides of
+the join operation.
+Joining two tables is always nonwindowed and joins the current state of both tables at
+the time the operation is performed. With Kafka Streams, we can perform an equi-
+join, in which both tables have the same key that is partitioned in the same way, and
+therefore the join operation can be efficiently distributed between a large number of
+application instances and machines.
+Kafka Streams also supports foreign-key join of two tables—the key of one stream

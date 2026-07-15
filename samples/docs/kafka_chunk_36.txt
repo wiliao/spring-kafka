@@ -1,0 +1,200 @@
+• Clients lose connectivity to one of the brokers
+• High latency between client and broker
+Validating System Reliability | 177
+
+=== PAGE 207 ===
+• Disk full
+• Hanging disk (also called “brown out”)
+• Leader election
+• Rolling restart of brokers
+• Rolling restart of consumers
+• Rolling restart of producers
+There are many tools that can be used to introduce network and disk faults, and
+many are excellent, so we will not attempt to make specific recommendations.
+Apache Kafka itself includes the Trogdor test framework for fault injection.  For each
+scenario, we will have expected behavior, which is what we planned on seeing when
+we developed the application. Then we run the test to see what actually happens. For
+example, when planning for a rolling restart of consumers, we planned for a short
+pause as consumers rebalance and then continue consumption with no more than
+1,000 duplicate values. Our test will show whether the way the application commits
+offsets and handles rebalances actually works this way.
+Monitoring Reliability in Production
+Testing the application is important, but it does not replace the need to continuously
+monitor production systems to make sure data is flowing as expected. Chapter 12 will
+cover detailed suggestions on how to monitor the Kafka cluster, but in addition to
+monitoring the health of the cluster, it is important to also monitor the clients and the
+flow of data through the system.
+Kafka’s Java clients include JMX metrics that allow monitoring client-side status and
+events. For the producers, the two metrics most important for reliability are
+error-rate and retry-rate per record (aggregated). Keep an eye on those, since error or
+retry rates going up can indicate an issue with the system. Also monitor the producer
+logs for errors that occur while sending events that are logged at WARN level, and say
+something along the lines of “Got error produce response with correlation id 5689 on
+topic-partition [topic-1,3], retrying (two attempts left). Error: … ” When we see
+events with 0 attempts left, the producer is running out of retries. In Chapter 3 we
+discussed how to configure delivery.timeout.ms and retries to improve the error
+handling in the producer and avoid running out of retries prematurely. Of course, it
+is always better to solve the problem that caused the errors in the first place. ERROR
+level log messages on the producer are likely to indicate that sending the message
+failed completely due to nonretriable error, a retriable error that ran out of retries, or
+a timeout. When applicable, the exact error from the broker will be logged as well.
+On the consumer side, the most important metric is consumer lag. This metric indi‐
+cates how far the consumer is from the latest message committed to the partition on
+178 | Chapter 7: Reliable Data Delivery
+
+=== PAGE 208 ===
+the broker. Ideally, the lag would always be zero and the consumer will always read
+the latest message. In practice, because calling poll() returns multiple messages and
+then the consumer spends time processing them before fetching more messages, the
+lag will always fluctuate a bit. What is important is to make sure consumers do even‐
+tually catch up rather than fall further and further behind. Because of the expected
+fluctuation in consumer lag, setting traditional alerts on the metric can be challeng‐
+ing. Burrow is a consumer lag checker by LinkedIn and can make this easier.
+Monitoring flow of data also means making sure all produced data is consumed in a
+timely manner (“timely manner” is usually based on business requirements). In order
+to make sure data is consumed in a timely manner, we need to know when the data
+was produced. Kafka assists in this: starting with version 0.10.0, all messages include
+a timestamp that indicates when the event was produced (although note that this can
+be overridden either by the application that is sending the events or by the brokers
+themselves if they are configured to do so).
+To make sure all produced messages are consumed within a reasonable amount of
+time, we will need the application producing the messages to record the number of
+events produced (usually as events per second). The consumers need to record the
+number of events consumed per unit or time, and the lag from the time events were
+produced to the time they were consumed, using the event timestamp. Then we will
+need a system to reconcile the events per second numbers from both the producer
+and the consumer (to make sure no messages were lost on the way) and to make sure
+the interval between produce time and consume time is reasonable. This type of end-
+to-end monitoring systems can be challenging and time-consuming to implement. To
+the best of our knowledge, there is no open source implementation of this type of sys‐
+tem, but Confluent provides a commercial implementation as part of the Confluent
+Control Center.
+In addition to monitoring clients and the end-to-end flow of data, Kafka brokers
+include metrics that indicate the rate of error responses sent from the brokers
+to clients. We recommend collecting kafka.server:type=BrokerTopicMetrics,
+name=FailedProduceRequestsPerSec and kafka.server:type=BrokerTopic
+Metrics,name=FailedFetchRequestsPerSec. At times, some level of error responses
+is expected—for example, if we shut down a broker for maintenance and new leaders
+are elected on another broker, it is expected that producers will receive a
+NOT_LEADER_FOR_PARTITION error, which will cause them to request updated meta‐
+data before continuing to produce events as usual. Unexplained increases in failed
+requests should always be investigated. To assist in such investigations, the failed
+requests metrics are tagged with the specific error response that the broker sent.
+Validating System Reliability | 179
+
+=== PAGE 209 ===
+Summary
+As we said in the beginning of the chapter, reliability is not just a matter of specific
+Kafka features. We need to build an entire reliable system, including the application
+architecture, the way applications use the producer and Consumer APIs, producer
+and consumer configuration, topic configuration, and broker configuration. Making
+the system more reliable always has trade-offs in application complexity, perfor‐
+mance, availability, or disk-space usage. By understanding all the options and com‐
+mon patterns and understanding requirements for each use case, we can make
+informed decisions regarding how reliable the application and Kafka deployment
+need to be and which trade-offs make sense.
+180 | Chapter 7: Reliable Data Delivery
+
+=== PAGE 210 ===
+CHAPTER 8
+Exactly-Once Semantics
+In Chapter 7 we discussed the configuration parameters and the best practices that
+allow Kafka users to control Kafka’s reliability guarantees. We focused on at-least-
+once delivery—the guarantee that Kafka will not lose messages that it acknowledged
+as committed. This still leaves open the possibility of duplicate messages.
+In simple systems where messages are produced and then consumed by various
+applications, duplicates are an annoyance that is fairly easy to handle. Most real-
+world applications contain unique identifiers that consuming applications can use to
+deduplicate the messages.
+Things become more complicated when we look at stream processing applications
+that aggregate events. When inspecting an application that consumes events, com‐
+putes an average, and produces the results, it is often impossible for those who check
+the results to detect that the average is incorrect because an event was processed twice
+while computing the average. In these cases, it is important to provide a stronger
+guarantee—exactly-once processing semantics.
+In this chapter, we will discuss how to use Kafka with exactly-once semantics, the rec‐
+ommended use cases, and the limitations. As we did with at-least-once guarantees, we
+will dive a bit deeper and provide some insight and intuition into how this guarantee
+is implemented. These details can be skipped when you first read the chapter but will
+be useful to understand before using the feature—it will help clarify the meaning of
+the different configurations and APIs and how best to use them.
+Exactly-once semantics in Kafka is a combination of two key features: idempotent
+producers, which help avoid duplicates caused by producer retries, and transactional
+semantics, which guarantee exactly-once processing in stream processing applica‐
+tions. We will discuss both, starting with the simpler and more generally useful idem‐
+potent producer.
+181
+
+=== PAGE 211 ===
+Idempotent Producer
+A service is called idempotent if performing the same operation multiple times has
+the same result as performing it a single time. In databases it is usually demonstrated
+as the difference between UPDATE t SET x=x+1 where y=5  and UPDATE t SET x=18
+where y=5. The first example is not idempotent; if we call it three times, we’ll end up
+with a very different result than if we were to call it once. The second example is
+idempotent—no matter how many times we run this statement, x will be equal to 18.
+How is this related to a Kafka producer? If we configure a producer to have at-least-
+once semantics rather than idempotent semantics, it means that in cases of uncer‐
+tainty, the producer will retry sending the message so it will arrive at least once. These
+retries could lead to duplicates.
+The classic case is when a partition leader received a record from the producer, repli‐
+cated it successfully to the followers, and then the broker on which the leader resides
+crashed before it could send a response to the producer. The producer, after a certain
+time without a response, will resend the message. The message will arrive at the new
+leader, who already has a copy of the message from the previous attempt—resulting
+in a duplicate.
+In some applications duplicates don’t matter much, but in others they can lead to
+inventory miscounts, bad financial statements, or sending someone two umbrellas
+instead of the one they ordered.
+Kafka’s idempotent producer solves this problem by automatically detecting and
+resolving such duplicates.
+How Does the Idempotent Producer Work?
+When we enable the idempotent producer, each message will include a unique identi‐
+fied producer ID (PID) and a sequence number. These, together with the target topic
+and partition, uniquely identify each message. Brokers use these unique identifiers to
+track the last five messages produced to every partition on the broker. To limit the
+number of previous sequence numbers that have to be tracked for each partition, we
+also require that the producers will use max.inflight.requests=5 or lower (the
+default is 5).
+When a broker receives a message that it already accepted before, it will reject the
+duplicate with an appropriate error. This error is logged by the producer and is reflec‐
+ted in its metrics but does not cause any exception and should not cause any alarm.
+On the producer client, it will be added to the record-error-rate metric. On the
+broker, it will be part of the ErrorsPerSec metric of the RequestMetrics type, which
+includes a separate count for each type of error.
+182 | Chapter 8: Exactly-Once Semantics
+
+=== PAGE 212 ===
+What if a broker receives a sequence number that is unexpectedly high? The broker
+expects message number 2 to be followed by message number 3; what happens if the
+broker receives message number 27 instead? In such cases the broker will respond
+with an “out of order sequence” error, but if we use an idempotent producer without
+using transactions, this error can be ignored.
+While the producer will continue normally after encountering an
+“out of order sequence number” exception, this error typically indi‐
+cates that messages were lost between the producer and the
+broker—if the broker received message number 2 followed by mes‐
+sage number 27, something must have happened to messages 3 to
+26. When encountering such an error in the logs, it is worth revisit‐
+ing the producer and topic configuration and making sure the pro‐
+ducer is configured with recommended values for high reliability
+and to check whether unclean leader election has occurred.
+As is always the case with distributed systems, it is interesting to consider the behav‐
+ior of an idempotent producer under failure conditions. Consider two cases: pro‐
+ducer restart and broker failure.
+Producer restart
+When a producer fails, usually a new producer will be created to replace it—whether
+manually by a human rebooting a machine, or using a more sophisticated framework
+like Kubernetes that provides automated failure recovery. The key point is that when
+the producer starts, if the idempotent producer is enabled, the producer will initialize
+and reach out to a Kafka broker to generate a producer ID. Each initialization of a
+producer will result in a completely new ID (assuming that we did not enable trans‐
+actions). This means that if a producer fails and the producer that replaces it sends a
+message that was previously sent by the old producer, the broker will not detect the
+duplicates—the two messages will have different producer IDs and different sequence
+numbers and will be considered as two different messages. Note that the same is true
+if the old producer froze and then came back to life after its replacement started—the
+original producer is not recognized as a zombie, because we have two totally different
+producers with different IDs.
+Broker failure
+When a broker fails, the controller elects new leaders for the partitions that had lead‐

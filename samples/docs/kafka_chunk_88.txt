@@ -1,0 +1,200 @@
+producer-property, 321
+producing four messages to a topic, 320
+using producer configuration options, 321
+kafka-consumer-groups.sh tool, 312-315
+--bootstrap-server and --list parameters,
+312
+--delete --group arguments, 313
+--describe and --group parameters, 312
+--export --group and --topic options, 314
+--reset-offsets --group --from-file options,
+315
+--reset-offsets and --dry-run options, 314
+resetting offsets based on range of options,
+244
+using for lag monitoring in MirrorMaker,
+255
+kafka-dump-log.sh tool, 332-333
+Index | 443
+
+=== PAGE 473 ===
+--index-sanity-check option, 333
+--print-data-log option, 333
+--value-decoder-class option, 333
+--verify-index-only option, 333
+dumping logs from a sample topic, 332
+kafka-leader-election.sh tool, 326
+--election-type and --all-topic-partitions
+options, 326
+kafka-mirror-maker.sh tool, 335
+kafka-performance-producer tool, 257
+kafka-preferred-replica-election.sh tool, 326
+kafka-reassign-partitions.sh tool, 327, 351
+--cancel option, 332
+--verify option, 330
+changing replication factor, 331
+moving topics onto brokers, 328
+other useful options, 329
+partition reassignment from a file, 329
+kafka-replica-verification.sh tool, 334
+kafka-topics.sh command, 305
+kafka-topics.sh tool, 142
+--alter command
+increasing topic partitions, 310
+--bootstrap-server option, 306
+--delete --topic, 311
+--describe --topic, 308
+--describe commad options to filter output,
+308
+--list option, 308
+--exclude-internal, 308
+commands to find topic partitions that may
+have probems, 309
+creating topics, 306
+--if-not-exists argument, 307
+listing under-replicated partitions, 350
+kafka.authorizer.logger, 298
+kafka.request.logger, 298
+KafkaAdminClient, 114
+(see also AdminClient)
+admin operations implemented directly, 115
+KafkaAvroDeserializer, 110
+KafkaAvroSerializer, 66
+KafkaConsumer object, 84
+KafkaFuture object, 120
+KafkaPrincipal, 269, 271
+KafkaStreams object, 404, 407, 410
+KafkaStreams.start method, 411
+kakfa-console-producer.sh tool, 320
+Kerberos authentication, 275, 276
+credentials with limited lifetime, 286
+for ZooKeeper server, 299
+secure DNS service reqired by, 276
+using SASL/GSSAPI for in ZooKeeper, 299
+kerberos.removeHostFromPrincipal, 300
+kerberos.removeRealmFromPrincipal, 300
+key management system (KMS), 289
+key stores and trust stores, 271
+creating for client and server with self-
+signed CA, 271
+for SSL on ZooKeeper, 300
+key store for brokers using self-signed CA
+certificate, 272
+updates to avoid failed TLS handshake, 274
+key-value pairs
+keys for ProducerRecords, 68
+mapping of keys to partitions, 69
+record headers, 71
+key.converter configuration (Connect workers),
+212
+key.deserializer property, 84
+key.serializer property, 50
+keys, 4
+difficulty of adjusting keyed topics, 310
+for clients, 317
+valid keys for topics, 316
+KRaft controller, 137-139
+Kreps, Jay, 15
+KStream object, 411
+KTable object, 409, 411
+L
+lag
+monitoring, 377
+monitoring consumer lag, 374
+monitoring in MirrorMaker, 255
+latency
+end-to-end, 165
+higher, in cross-datacenter communication,
+235
+producer and end-to-end latency, 56
+transaction timeout and, 190
+leader, 8
+consumer group, 83
+leader count metric, 359
+leader election, 128
+preferred leader replica, 326
+preferred replica election, 326
+starting on specific partitions or topics, 326
+444 | Index
+
+=== PAGE 474 ===
+testing with VeriafiableProducer, 177
+unclean leader election, 166
+with new KRaft controller, 139
+leader replica, 140
+becoming unavailable, 166
+LeaderAndIsr request, 148
+LeaderSelector, 140
+LEADER_NOT_AV AILABLE error, 171
+linger.ms parameter, 59, 153, 258
+LinkedIn Brooklin, 260
+LinkedIn, Kafka's origin at, 14
+Linux
+recommended OS for Kafka, 19
+tuning for Kafka clusters, 38
+disk, 41
+networking, 41
+virtual memory, 39
+tuning the Linux network, 258
+listeners
+SSL and SASL_SSL, 288
+listeners configuration, 25
+ListOffsetsRequest, 148
+ListTopicOptions object, 114
+load-kafka-config, 215
+local state, 393
+local storage, 150
+log append time, 386
+log compacted, 9
+log.cleaner.enabled configuration, 157
+log.dirs configuration, 26, 149
+log.retention.bytes parameter, 30
+log.retention.ms parameter, 30
+log.roll.ms parameter, 32
+log.segment.bytes parameter, 31
+log4j logs, 298
+logging, 369
+brokers generating comprehensive log4j
+logs for auditing, 298
+dumping log segments, 332-333
+information about log compaction threads,
+369
+using Kafka to collect system logs, 13
+LoggingMessageFormatter, 324
+Logstash, 229
+M
+macOS, installing Kafka on, 424
+installing manually, 425
+using Homebrew, 424
+managing Kafka programmatically, 113-133
+adding partitions to a topic, 127
+AdminClient lifecycle, 115-117
+AdminClient overview, 113-115
+cluster metadata, 127
+configuration management, 121-123
+consumer group management, 123-126
+deleting records from a topic, 128
+leader election, 128
+reassigning replicas, 129
+testing, 131-133
+topic management with AdminClient,
+118-121
+map/reduce processing, 14
+materializing the stream, 389
+max.block.ms parameter, 57
+max.compaction.lag.ms parameter, 159
+max.connections parameter, 319
+max.in.flight.requests.per.connection, 60, 61,
+185, 258
+max.inflight.requests parameter, 182
+max.partition.fetch.bytes parameter, 89
+max.poll.interval.ms parameter, 87, 90
+max.poll.records parameter, 89
+max.request.size parameter, 60
+MaxFileDescriptorCount, 367
+memory, 34
+configuring for compaction threads, 157
+Linux virtual memory, tuning for Kafka, 39
+message serialization, 16
+message.max.bytes parameter, 32, 60
+MessageConversionsTimeMs, 155

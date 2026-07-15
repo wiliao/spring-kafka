@@ -1,0 +1,200 @@
+The OneMinuteRate will fluctuate quickly and provides more of a “point in time” view
+of the measurement. This is useful for seeing short spikes in traffic. The MeanRate will
+not vary much at all and provides an overall trend. Though MeanRate has its uses, it is
+probably not the metric you want to be alerted on. The FiveMinuteRate and Fifteen
+MinuteRate provide a compromise between the two.
+In addition to the rate attributes, there is a Count attribute as well. This is a constantly
+increasing value for the metric since the time the broker was started. For this metric,
+all topics bytes in, the Count represents the total number of bytes produced to the
+broker since the process was started. Utilized with a metrics system that supports
+countermetrics, this can give you an absolute view of the measurement instead of an
+averaged rate.
+All topics bytes out
+The all topics bytes out rate, similar to the bytes in rate, is another overall growth met‐
+ric. In this case, the bytes out rate shows the rate at which consumers are reading
+messages out. The outbound bytes rate may scale differently than the inbound bytes
+rate, thanks to Kafka’s capacity to handle multiple consumers with ease. There are
+many deployments of Kafka where the outbound rate can easily be six times the
+inbound rate! This is why it is important to observe and trend the outbound bytes
+rate separately. See Table 13-9 for more details.
+Table 13-9. All topics bytes out metric details
+Metric name Bytes out per second
+JMX MBean kafka.server:type=BrokerTopicMetrics,name=BytesOutPerSec
+Value range Rates as doubles, count as integer
+Replica Fetchers Included
+The outbound bytes rate also includes the replica traffic. This
+means that if all of the topics are configured with a replication fac‐
+tor of 2, you will see a bytes out rate equal to the bytes in rate when
+there are no consumer clients. If you have one consumer client
+reading all the messages in the cluster, then the bytes out rate will
+be twice the bytes in rate. This can be confusing when looking at
+the metrics if you’re not aware of what is counted.
+358 | Chapter 13: Monitoring Kafka
+
+=== PAGE 388 ===
+All topics messages in
+While the byte rates described previously show the broker traffic in absolute terms of
+bytes, the messages in rate shows the number of individual messages, regardless of
+their size, produced per second. This is useful as a growth metric as a different meas‐
+ure of producer traffic. It can also be used in conjunction with the bytes in rate to
+determine an average message size. Y ou may also see an imbalance in the brokers, just
+like with the bytes in rate, that will alert you to necessary maintenance work. See
+Table 13-10 for more details.
+Table 13-10. All topics messages in metric details
+Metric name Messages in per second
+JMX MBean kafka.server:type=BrokerTopicMetrics,name=MessagesInPerSec
+Value range Rates as doubles, count as integer
+Why No Messages Out?
+People often ask why there is no messages out metric for the Kafka
+broker. The reason is that when messages are consumed, the broker
+just sends the next batch to the consumer without expanding it to
+find out how many messages are inside. Therefore, the broker
+doesn’t really know how many messages were sent out. The only
+metric that can be provided is the number of fetches per second,
+which is a request rate, not a messages count.
+Partition count
+The partition count for a broker generally doesn’t change that much, as it is the total
+number of partitions assigned to that broker. This includes every replica the broker
+has, regardless of whether it is a leader or follower for that partition. Monitoring this
+is often more interesting in a cluster that has automatic topic creation enabled, as that
+can leave the creation of topics outside of the control of the person running the clus‐
+ter. See Table 13-11 for more details.
+Table 13-11. Partition count metric details
+Metric name Partition count
+JMX MBean kafka.server:type=ReplicaManager,name=PartitionCount
+Value range Integer, zero or greater
+Leader count
+The leader count metric shows the number of partitions that the broker is currently
+the leader for. As with most other measurements in the brokers, this one should be
+generally even across the brokers in the cluster. It is much more important to check
+Kafka Broker Metrics | 359
+
+=== PAGE 389 ===
+the leader count on a regular basis, possibly alerting on it, as it will indicate when the
+cluster is imbalanced even if the number of replicas are perfectly balanced in count
+and size across the cluster. This is because a broker can drop leadership for a partition
+for many reasons, such as a ZooKeeper session expiration, and it will not automati‐
+cally take leadership back once it recovers (except if you have enabled automatic
+leader rebalancing). In these cases, this metric will show fewer leaders, or often zero,
+which indicates that you need to run a preferred replica election to rebalance leader‐
+ship in the cluster. See Table 13-12 for more details.
+Table 13-12. Leader count metric details
+Metric name Leader count
+JMX MBean kafka.server:type=ReplicaManager,name=LeaderCount
+Value range Integer, zero or greater
+A useful way to consume this metric is to use it along with the partition count to
+show a percentage of partitions that the broker is the leader for. In a well-balanced
+cluster that is using a replication factor of 2, all brokers should be leaders for approxi‐
+mately 50% of their partitions. If the replication factor in use is 3, this percentage
+drops to 33%.
+Offline partitions
+Along with the under-replicated partitions count, the offline partitions count is a criti‐
+cal metric for monitoring (see Table 13-13). This measurement is only provided by
+the broker that is the controller for the cluster (all other brokers will report 0) and
+shows the number of partitions in the cluster that currently have no leader. Partitions
+without leaders can happen for two main reasons:
+• All brokers hosting replicas for this partition are down
+• No in-sync replica can take leadership due to message-count mismatches (with
+unclean leader election disabled)
+Table 13-13. Offline partitions count metric details
+Metric name Offline partitions count
+JMX MBean kafka.controller:type=KafkaController,name=OfflinePartitionsCount
+Value range Integer, zero or greater
+360 | Chapter 13: Monitoring Kafka
+
+=== PAGE 390 ===
+In a production Kafka cluster, an offline partition may be impacting the producer cli‐
+ents, losing messages or causing back pressure in the application. This is most often a
+“site down” type of problem and will need to be addressed immediately.
+Request metrics
+The Kafka protocol, described in Chapter 6, has many different requests. Metrics are
+provided for how each of those requests performs. As of version 2.5.0, the following
+requests have metrics provided:
+Table 13-14. Request metrics names
+AddOffsetsToTxn AddPartitionsToTxn AlterConfigs
+AlterPartitionReassignments AlterReplicaLogDirs ApiVersions
+ControlledShutdown CreateAcls CreateDelegationToken
+CreatePartitions CreateTopics DeleteAcls
+DeleteGroups DeleteRecords DeleteTopics
+DescribeAcls DescribeConfigs DescribeDelegationToken
+DescribeGroups DescribeLogDirs ElectLeaders
+EndTxn ExpireDelegationToken Fetch
+FetchConsumer FetchFollower FindCoordinator
+Heartbeat IncrementalAlterConfigs InitProducerId
+JoinGroup LeaderAndIsr LeaveGroup
+ListGroups ListOffsets ListPartitionReassignments
+Metadata OffsetCommit OffsetDelete
+OffsetFetch OffsetsForLeaderEpoch Produce
+RenewDelegationToken SaslAuthenticate SaslHandshake
+StopReplica SyncGroup TxnOffsetCommit
+UpdateMetadata WriteTxnMarkers
+For each of these requests, there are eight metrics provided, providing insight into
+each phase of the request processing. For example, for the Fetch request, the metrics
+shown in Table 13-15 are available.
+Table 13-15. Fetch request metrics
+Name JMX MBean
+Total time kafka.network:type=RequestMetrics,name=TotalTimeMs,request=Fetch
+Request
+queue time
+kafka.network:type=RequestMetrics,name=RequestQueueTimeMs,request=Fetch
+Local time kafka.network:type=RequestMetrics,name=LocalTimeMs,request=Fetch
+Kafka Broker Metrics | 361
+
+=== PAGE 391 ===
+Name JMX MBean
+Remote time kafka.network:type=RequestMetrics,name=RemoteTimeMs,request=Fetch
+Throttle time kafka.network:type=RequestMetrics,name=ThrottleTimeMs,request=Fetch
+Response
+queue time
+kafka.network:type=RequestMetrics,name=ResponseQueueTimeMs,request=Fetch
+Response
+send time
+kafka.network:type=RequestMetrics,name=ResponseSendTimeMs,request=Fetch
+Requests per
+second
+kafka.network:type=RequestMetrics,name=RequestsPerSec,request=Fetch
+The requests per second metric is a rate metric, as discussed earlier, and shows the
+total number of that type of request that has been received and processed over the
+time unit. This provides a view into the frequency of each request time, though it
+should be noted that many of the requests, such as StopReplica and UpdateMeta
+data, are infrequent.
+The seven time metrics each provide a set of percentiles for requests, as well as a dis‐
+crete Count attribute, similar to rate metrics. The metrics are all calculated since the
+broker was started, so keep that in mind when looking at metrics that do not change
+for long periods of time; the longer your broker has been running, the more stable
+the numbers will be. The parts of request processing they represent are:
+Total time
+The total amount of time the broker spends processing the request, from receiv‐
+ing it to sending the response back to the requester
+Request queue time
+The amount of time the request spends in queue after it has been received but
+before processing starts
+Local time
+The amount of time the partition leader spends processing a request, including
+sending it to disk (but not necessarily flushing it)
+Remote time
+The amount of time spent waiting for the followers before request processing can
+complete
+Throttle time
+The amount of time the response must be held in order to slow the requestor
+down to satisfy client quota settings
+Response queue time
+The amount of time the response to the request spends in the queue before it can
+be sent to the requestor
+362 | Chapter 13: Monitoring Kafka
+
+=== PAGE 392 ===
+Response send time
+The amount of time spent actually sending the response
+The attributes provided for each metric are:
+Count
+Absolute count of number of requests since process start
+Min
+Minimum value for all requests
+Max
+Maximum value for all requests
+Mean
+Average value for all requests
+StdDev
+The standard deviation of the request timing measurements as a whole
+Percentiles

@@ -1,0 +1,200 @@
+=== PAGE 162 ===
+@Test
+public void testNotTopic() throws ExecutionException, InterruptedException {
+    TopicCreator tc = new TopicCreator(admin);
+    tc.maybeCreateTopic("not.a.test");
+    verify(admin, never()).createTopics(any()); 
+}
+The topic name starts with “test, ” so we expect maybeCreateTopic() to create a
+topic. We check that createTopics() was called once.
+When the topic name doesn’t start with “test, ” we verify that createTopics() was
+not called at all.
+One last note: Apache Kafka published MockAdminClient in a test jar, so make sure
+your pom.xml includes a test dependency:
+<dependency>
+    <groupId>org.apache.kafka</groupId>
+    <artifactId>kafka-clients</artifactId>
+    <version>2.5.0</version>
+    <classifier>test</classifier>
+    <scope>test</scope>
+</dependency>
+Summary
+AdminClient is a useful tool to have in your Kafka development kit.  It is useful for
+application developers who want to create topics on the fly and validate that the top‐
+ics they are using are configured correctly for their application. It is also useful for
+operators and SREs who want to create tooling and automation around Kafka or need
+to recover from an incident. AdminClient has so many useful methods that SREs can
+think of it as a Swiss Army knife for Kafka operations.
+In this chapter we covered all the basics of using Kafka’s AdminClient: topic manage‐
+ment, configuration management, and consumer group management, plus a few
+other useful methods that are good to have in your back pocket—you never know
+when you’ll need them.
+Summary | 133
+
+=== PAGE 164 ===
+CHAPTER 6
+Kafka Internals
+It is not strictly necessary to understand Kafka’s internals in order to run Kafka in
+production or write applications that use it. However, knowing how Kafka works
+does provide context when troubleshooting or trying to understand why Kafka
+behaves the way it does. Since covering every single implementation detail and design
+decision is beyond the scope of this book, in this chapter we focus on a few topics that
+are especially relevant to Kafka practitioners:
+• Kafka controller
+• How Kafka replication works
+• How Kafka handles requests from producers and consumers
+• How Kafka handles storage, such as file format and indexes
+Understanding these topics in-depth will be especially useful when tuning Kafka—
+understanding the mechanisms that the tuning knobs control goes a long way toward
+using them with precise intent rather than fiddling with them randomly.
+Cluster Membership
+Kafka uses Apache ZooKeeper to maintain the list of brokers that are currently mem‐
+bers of a cluster. Every broker has a unique identifier that is either set in the broker
+configuration file or automatically generated. Every time a broker process starts, it
+registers itself with its ID in ZooKeeper by creating an ephemeral node. Kafka brokers,
+the controller, and some of the ecosystem tools subscribe to the /brokers/ids path in
+ZooKeeper where brokers are registered so that they get notified when brokers are
+added or removed.
+135
+
+=== PAGE 165 ===
+If you try to start another broker with the same ID, you will get an error—the new
+broker will try to register but fail because we already have a ZooKeeper node for the
+same broker ID.
+When a broker loses connectivity to ZooKeeper (usually as a result of the broker
+stopping, but this can also happen as a result of network partition or a long garbage-
+collection pause), the ephemeral node that the broker created when starting will be
+automatically removed from ZooKeeper. Kafka components that are watching the list
+of brokers will be notified that the broker is gone.
+Even though the node representing the broker is gone when the broker is stopped,
+the broker ID still exists in other data structures. For example, the list of replicas of
+each topic (see “Replication” on page 139) contains the broker IDs for the replica.
+This way, if you completely lose a broker and start a brand-new broker with the ID of
+the old one, it will immediately join the cluster in place of the missing broker with the
+same partitions and topics assigned to it.
+The Controller
+The controller is one of the Kafka brokers that, in addition to the usual broker func‐
+tionality, is responsible for electing partition leaders. The first broker that starts in the
+cluster becomes the controller by creating an ephemeral node in ZooKeeper
+called /controller. When other brokers start, they also try to create this node but
+receive a “node already exists” exception, which causes them to “realize” that the con‐
+troller node already exists and that the cluster already has a controller. The brokers
+create a ZooKeeper watch on the controller node so they get notified of changes to this
+node. This way, we guarantee that the cluster will only have one controller at a time.
+When the controller broker is stopped or loses connectivity to ZooKeeper, the
+ephemeral node will disappear. This includes any scenario in which the ZooKeeper
+client used by the controller stops sending heartbeats to ZooKeeper for longer than
+zookeeper.session.timeout.ms. When the ephemeral node disappears, other brok‐
+ers in the cluster will be notified through the ZooKeeper watch that the controller is
+gone and will attempt to create the controller node in ZooKeeper themselves. The
+first node to create the new controller in ZooKeeper becomes the next controller,
+while the other nodes will receive a “node already exists” exception and re-create the
+watch on the new controller node. Each time a controller is elected, it receives a new,
+higher controller epoch number through a ZooKeeper conditional increment opera‐
+tion. The brokers know the current controller epoch, and if they receive a message
+from a controller with an older number, they know to ignore it. This is important
+because the controller broker can disconnect from ZooKeeper due to a long garbage
+collection pause—during this pause a new controller will be elected. When the previ‐
+ous leader resumes operations after the pause, it can continue sending messages to
+brokers without knowing that there is a new controller—in this case, the old
+136 | Chapter 6: Kafka Internals
+
+=== PAGE 166 ===
+controller is considered a zombie. The controller epoch in the message, which allows
+brokers to ignore messages from old controllers, is a form of zombie fencing.
+When the controller first comes up, it has to read the latest replica state map from
+ZooKeeper before it can start managing the cluster metadata and performing leader
+elections. The loading process uses async APIs, and pipelines the read requests to
+ZooKeeper to hide latencies. But even so, in clusters with large numbers of partitions,
+the loading process can take several seconds—several tests and comparisons are
+described in an Apache Kafka 1.1.0 blog post.
+When the controller notices that a broker left the cluster (by watching the relevant
+ZooKeeper path or because it received a ControlledShutdownRequest from the
+broker), it knows that all the partitions that had a leader on that broker will need a
+new leader. It goes over all the partitions that need a new leader and determines who
+the new leader should be (simply the next replica in the replica list of that partition).
+Then it persists the new state to ZooKeeper (again, using pipelined async requests to
+reduce latency) and then sends a LeaderAndISR request to all the brokers that contain
+replicas for those partitions. The request contains information on the new leader and
+followers for the partitions. These requests are batched for efficiency, so each request
+includes new leadership information for multiple partitions that have a replica on the
+same broker. Each new leader knows that it needs to start serving producer and con‐
+sumer requests from clients, while the followers know that they need to start replicat‐
+ing messages from the new leader. Since every broker in the cluster has a
+MetadataCache that includes a map of all brokers and all replicas in the cluster, the
+controller sends all brokers information about the leadership change in an Update
+Metadata request so they can update their caches. A similar process repeats when a
+broker starts back up—the main difference is that all replicas in the broker start as
+followers and need to catch up to the leader before they are eligible to be elected as
+leaders themselves.
+To summarize, Kafka uses ZooKeeper’s ephemeral node feature to elect a controller
+and to notify the controller when nodes join and leave the cluster. The controller is
+responsible for electing leaders among the partitions and replicas whenever it notices
+nodes join and leave the cluster. The controller uses the epoch number to prevent a
+“split brain” scenario where two nodes believe each is the current controller.
+KRaft: Kafka’s New Raft-Based Controller
+Starting in 2019, the Apache Kafka community started on an ambitious project: mov‐
+ing away from the ZooKeeper-based controller to a Raft-based controller quorum.
+The preview version of the new controller, named KRaft, is part of the Apache Kafka
+2.8 release. The Apache Kafka 3.0 release, planned for mid 2021, will include the first
+production version of KRaft, and Kafka clusters will be able to run with either the
+traditional ZooKeeper-based controller or KRaft.
+The Controller | 137
+
+=== PAGE 167 ===
+Why did the Kafka community decide to replace the controller? Kafka’s existing con‐
+troller already underwent several rewrites, but despite improvements to the way it
+uses ZooKeeper to store the topic, partition, and replica information, it became clear
+that the existing model will not scale to the number of partitions we want Kafka to
+support. Several known concerns motivated the change:
+• Metadata updates are written to ZooKeeper synchronously but are sent to brok‐
+ers asynchronously. In addition, receiving updates from ZooKeeper is asynchro‐
+nous. All this leads to edge cases where metadata is inconsistent between brokers,
+controller, and ZooKeeper. These cases are challenging to detect.
+• Whenever the controller is restarted, it has to read all the metadata for all brokers
+and partitions from ZooKeeper and then send this metadata to all brokers.
+Despite years of effort, this remains a major bottleneck—as the number of parti‐
+tions and brokers increases, restarting the controller becomes slower.
+• The internal architecture around metadata ownership is not great—some opera‐
+tions were done via the controller, others via any broker, and others directly on
+ZooKeeper.
+• ZooKeeper is its own distributed system, and, just like Kafka, it requires some
+expertise to operate. Developers who want to use Kafka therefore need to learn
+two distributed systems, not just one.
+With all these concerns in mind, the Apache Kafka community chose to replace the
+existing ZooKeeper-based controller.
+In the existing architecture, ZooKeeper has two important functions: it is used to
+elect a controller and to store the cluster metadata—registered brokers, configuration,
+topics, partitions, and replicas. In addition, the controller itself manages the
+metadata—it is used to elect leaders, create and delete topics, and reassign replicas.
+All this functionality will have to be replaced in the new controller.
+The core idea behind the new controller design is that Kafka itself has a log-based
+architecture, where users represent state as a stream of events. The benefits of such
+representation are well understood in the community—multiple consumers can
+quickly catch up to the latest state by replaying events. The log establishes a clear
+ordering between events and ensures that the consumers always move along a single
+timeline. The new controller architecture brings the same benefits to the manage‐
+ment of Kafka’s metadata.
+138 | Chapter 6: Kafka Internals
+
+=== PAGE 168 ===
+In the new architecture, the controller nodes are a Raft quorum that manages the log
+of metadata events. This log contains information about each change to the cluster
+metadata. Everything that is currently stored in ZooKeeper, such as topics, partitions,
+ISRs, configurations, and so on, will be stored in this log.
+Using the Raft algorithm, the controller nodes will elect a leader from among them‐
+selves, without relying on any external system. The leader of the metadata log is called
+the active controller. The active controller handles all RPCs made from the brokers.
+The follower controllers replicate the data that is written to the active controller and
+serve as hot standbys if the active controller should fail. Because the controllers will
+now all track the latest state, controller failover will not require a lengthy reloading
+period in which we transfer all the state to the new controller.
+Instead of the controller pushing out updates to the other brokers, those brokers will
+fetch updates from the active controller via a new MetadataFetch API. Similar to a
+fetch request, brokers will track the offset of the latest metadata change they fetched
+and will only request newer updates from the controller. Brokers will persist the
+metadata to disk, which will allow them to start up quickly, even with millions of
+partitions.
+Brokers will register with the controller quorum and will remain registered until
+unregistered by an admin, so once a broker shuts down, it is offline but still regis‐
+tered. Brokers that are online but are not up-to-date with the latest metadata will be

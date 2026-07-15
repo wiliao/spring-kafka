@@ -1,0 +1,200 @@
+    }
+  }
+}
+296 | Chapter 11: Securing Kafka
+
+=== PAGE 326 ===
+Groups to which each user belongs, populated from an external source like
+LDAP .
+Roles associated with each user, populated from an external source like LDAP .
+We perform authorization for the user as well as for all the groups and roles of
+the user.
+If any of the contexts are authorized, we return ALLOWED. Note that this example
+doesn’t support Deny ACLs for groups or roles.
+We create an authorization context for each principal with the same metadata as
+the original context.
+ACLs can be assigned for the group Sales or the role Operator using the standard
+Kafka ACL tool:
+$ bin/kafka-acls.sh --bootstrap-server localhost:9092            \
+  --command-config admin.props --add --topic customer --producer \
+  --resource-pattern-type PREFIXED --allow-principal Group:Sales 
+$ bin/kafka-acls.sh --bootstrap-server localhost:9092 \
+  --command-config admin.props --add --cluster --operation Alter \
+  --allow-principal=Role:Operator  
+We use the principal Group:Sales with the custom principal type Group to create
+an ACL that applies to users belonging to the group Sales.
+We use the principal Role:Operator with the custom principal type Role to cre‐
+ate an ACL that applies to users with the role Operator.
+Security Considerations
+Since AclAuthorizer stores ACLs in ZooKeeper, access to ZooKeeper should be
+restricted. Deployments without a secure ZooKeeper can implement custom author‐
+izers to store ACLs in a secure external database.
+In large organizations with a large number of users, managing ACLs for individual
+resources may become very cumbersome. Reserving different resource prefixes for
+different departments enables the use of prefixed ACLs that minimize the number of
+ACLs required. This can be combined with group- or role-based ACLs, as shown in
+the example earlier, to further simplify access control in large deployments.
+Restricting user access using the principle of least privilege can limit exposure if a
+user is compromised. This means granting access only to the resources necessary for
+each user principal to perform their operations, and removing ACLs when they are
+no longer required. ACLs should be removed immediately when a user principal is
+Authorization | 297
+
+=== PAGE 327 ===
+no longer in use, for instance, when a person leaves the organization. Long-running
+applications can be configured with service credentials rather than credentials associ‐
+ated with a specific user to avoid any disruption when employees leave the organiza‐
+tion. Since long-lived connections with a user principal may continue to process
+requests even after the user has been removed from the system, Deny ACLs can be
+used to ensure that the principal is not unintentionally granted access through ACLs
+with wildcard principals. Reuse of principals must be avoided if possible to prevent
+access from being granted to connections using the older version of a principal.
+Auditing
+Kafka brokers can be configured to generate comprehensive log4j logs for auditing
+and debugging. The logging level as well as the appenders used for logging and their
+configuration options can be specified in log4j.properties. The logger instances
+kafka.authorizer.logger used for authorization logging and kafka.request. logger
+used for request logging can be configured independently to customize the log level
+and retention for audit logging. Production systems can use frameworks like the Elas‐
+tic Stack to analyze and visualize these logs.
+Authorizers generate INFO-level log entries for every attempted operation for which
+access was denied, and log entries at the DEBUG level for every operation for which
+access was granted. For example:
+DEBUG Principal = User:Alice is Allowed Operation = Write from host = 127.0.0.1 
+on resource = Topic:LITERAL:customerOrders for request = Produce with resourceR-
+efCount = 1 (kafka.authorizer.logger)
+INFO Principal = User:Mallory is Denied Operation = Describe from host = 
+10.0.0.13 on resource = Topic:LITERAL:customerOrders for request = Metadata 
+with resourceRefCount = 1 (kafka.authorizer.logger)
+Request logging generated at the DEBUG level also includes details of the user principal
+and client host. Full details of the request are included if the request logger is config‐
+ured to log at the TRACE level. For example:
+DEBUG Completed request:RequestHeader(apiKey=PRODUCE, apiVersion=8, 
+clientId=producer-1, correlationId=6) -- 
+{acks=-1,timeout=30000,partitionSizes=[customerOrders-0=15514]},response:
+{responses=[{topic=customerOrders,partition_responses=[{partition=0,error_code=0
+,base_offset=13,log_append_time=-1,log_start_offset=0,record_errors=[],error_mes
+sage=null}]}],throttle_time_ms=0} from connection 
+127.0.0.1:9094-127.0.0.1:61040-0;totalTime:2.42,requestQueueTime:0.112,local-
+Time:2.15,remoteTime:0.0,throttleTime:0,responseQueueTime:0.04,sendTime:
+0.118,securityProtocol:SASL_SSL,principal:User:Alice,listener:SASL_SSL,clientInf
+ormation:ClientInformation(softwareName=apache-kafka-java, 
+softwareVersion=2.7.0-SNAPSHOT) (kafka.request.logger)
+Authorizer and request logs can be analyzed to detect suspicious activities. Metrics
+that track authentication failures, as well as authorization failure logs, can be
+298 | Chapter 11: Securing Kafka
+
+=== PAGE 328 ===
+extremely useful for auditing and provide valuable information in the event of an
+attack or unauthorized access. For end-to-end auditability and traceability of mes‐
+sages, audit metadata can be included in message headers when messages are pro‐
+duced. End-to-end encryption can be used to protect the integrity of this metadata.
+Securing ZooKeeper
+ZooKeeper stores Kafka metadata that is critical for maintaining the availability of
+Kafka clusters, and hence it is vital to secure ZooKeeper in addition to securing
+Kafka. ZooKeeper supports authentication using SASL/GSSAPI for Kerberos authen‐
+tication and SASL/DIGEST-MD5 for username/password authentication.  ZooKeeper
+also added TLS support in 3.5.0, enabling mutual authentication as well as encryption
+of data in transit. Note that SASL/DIGEST-MD5 should only be used with TLS
+encryption and is not suitable for production use due to known security
+vulnerabilities.
+SASL
+SASL configuration for ZooKeeper is provided using the Java system property
+java.security.auth.login.config. The property must be set to a JAAS configura‐
+tion file that contains a login section with the appropriate login module and its
+options for the ZooKeeper server. Kafka brokers must be configured with the client-
+side login section for ZooKeeper clients to talk to SASL-enabled ZooKeeper servers.
+The Server section that follows provides the JAAS configuration for the ZooKeeper
+server to enable Kerberos authentication:
+Server {
+  com.sun.security.auth.module.Krb5LoginModule required
+  useKeyTab=true storeKey=true
+  keyTab="/path/to/zk.keytab"
+  principal="zookeeper/zk1.example.com@EXAMPLE.COM";
+};
+To enable SASL authentication on ZooKeeper servers, configure authentication pro‐
+viders in the ZooKeeper configuration file:
+authProvider.sasl=org.apache.zookeeper.server.auth.SASLAuthenticationProvider
+kerberos.removeHostFromPrincipal=true
+kerberos.removeRealmFromPrincipal=true
+Securing ZooKeeper | 299
+
+=== PAGE 329 ===
+Broker Principal
+By default, ZooKeeper uses the full Kerberos principal, e.g., kafka/
+broker1.example.com@EXAMPLE.COM, as the client identity. When
+ACLs are enabled for ZooKeeper authorization, ZooKeeper servers
+should be configured with kerberos.removeHostFromPrincipal=
+true and kerberos.removeRealmFromPrincipal=true to ensure
+that all brokers have the same principal.
+Kafka brokers must be configured to authenticate to ZooKeeper using SASL with a
+JAAS configuration file that provides client credentials for the broker:
+Client {
+  com.sun.security.auth.module.Krb5LoginModule required
+  useKeyTab=true storeKey=true
+  keyTab="/path/to/broker1.keytab"
+  principal="kafka/broker1.example.com@EXAMPLE.COM";
+};
+SSL
+SSL may be enabled on any ZooKeeper endpoint, including those that use SASL
+authentication. Like Kafka, SSL may be configured to enable client authentication, but
+unlike Kafka, connections with both SASL and SSL client authentication authenticate
+using both protocols and associate multiple principals with the connection. Zoo‐
+Keeper authorizer grants access to a resource if any of the principals associated with
+the connection have access.
+To configure SSL on a ZooKeeper server, a key store with the hostname of the server
+or a wildcarded host should be configured. If client authentication is enabled, a trust
+store to validate client certificates is also required:
+secureClientPort=2181
+serverCnxnFactory=org.apache.zookeeper.server.NettyServerCnxnFactory
+authProvider.x509=org.apache.zookeeper.server.auth.X509AuthenticationProvider
+ssl.keyStore.location=/path/to/zk.ks.p12
+ssl.keyStore.password=zk-ks-password
+ssl.keyStore.type=PKCS12
+ssl.trustStore.location=/path/to/zk.ts.p12
+ssl.trustStore.password=zk-ts-password
+ssl.trustStore.type=PKCS12
+To configure SSL for Kafka connections to ZooKeeper, brokers should be configured
+with a trust store to validate ZooKeeper certificates. If client authentication is
+enabled, a key store is also required:
+zookeeper.ssl.client.enable=true
+zookeeper.clientCnxnSocket=org.apache.zookeeper.ClientCnxnSocketNetty
+zookeeper.ssl.keystore.location=/path/to/zkclient.ks.p12
+zookeeper.ssl.keystore.password=zkclient-ks-password
+300 | Chapter 11: Securing Kafka
+
+=== PAGE 330 ===
+zookeeper.ssl.keystore.type=PKCS12
+zookeeper.ssl.truststore.location=/path/to/zkclient.ts.p12
+zookeeper.ssl.truststore.password=zkclient-ts-password
+zookeeper.ssl.truststore.type=PKCS12
+Authorization
+Authorization can be enabled for ZooKeeper nodes by setting ACLs for the path.
+When brokers are configured with zookeeper.set.acl=true, the broker sets ACLs
+for ZooKeeper nodes when creating the node. By default, metadata nodes are reada‐
+ble by everyone but modifiable only by brokers. Additional ACLs may be added if
+required for internal admin users who may need to update metadata directly in Zoo‐
+Keeper. Sensitive paths, like nodes containing SCRAM credentials, are not world-
+readable by default.
+Securing the Platform
+In the previous sections, we discussed the options for locking down access to Kafka
+and ZooKeeper in order to safeguard Kafka deployments. Security design for a pro‐
+duction system should use a threat model that addresses security threats not just for
+individual components but also for the system as a whole. Threat models build an
+abstraction of the system and identify potential threats and the associated risks. Once
+the threats are evaluated, documented, and prioritized based on risks, mitigation
+strategies must be implemented for each potential threat to ensure that the whole sys‐
+tem is protected. When assessing potential threats, it is important to consider exter‐
+nal threats as well as insider threats. For systems that store Personally Identifiable
+Information (PII) or other sensitive data, additional measures to comply with regula‐
+tory policies must also be implemented. An in-depth discussion of standard threat
+modeling techniques is outside the scope of this chapter.
+In addition to protecting data in Kafka and metadata in ZooKeeper using secure
+authentication, authorization, and encryption, extra steps must be taken to ensure
+that the platform is secure. Defenses may include network firewall solutions to pro‐
+tect the network and encryption to protect physical storage. Key stores, trust stores,
+and Kerberos keytab files that contain credentials used for authentication must be
+protected using filesystem permissions. Access to configuration files containing
+security-critical information like credentials must be restricted. Since passwords
+stored in clear-text in configuration files are insecure even if access is restricted,
+Kafka supports externalizing passwords in a secure store.

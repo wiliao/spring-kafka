@@ -1,0 +1,200 @@
+  }
+}
+We’ d then use the commands shown earlier to execute on this proposal. When it
+completes, we can verify the RF has been increased by either using the --verify flag
+or using the kafka-topics.sh script to describe the topic:
+# kafka-topics.sh --bootstrap-server localhost:9092 --topic foo1 --describe
+  Topic:foo1 PartitionCount:3 ReplicationFactor:3 Configs:
+    Topic: foo1 Partition: 0 Leader: 5 Replicas: 5,6,4 Isr: 5,6,4
+    Topic: foo1 Partition: 1 Leader: 5 Replicas: 5,6,4 Isr: 5,6,4
+    Topic: foo1 Partition: 2 Leader: 5 Replicas: 5,6,4 Isr: 5,6,4
+#
+Canceling replica reassignments
+Canceling a replica reassignment in the past was a dangerous process that required
+unsafe manual manipulation of ZooKeeper nodes (or znodes) by deleting
+the /admin/reassign_partitions znode. Fortunately, this is no longer the case. The
+kafka-reassign-partitions.sh script (as well as the AdminClient it is a wrapper
+Partition Management | 331
+
+=== PAGE 361 ===
+for) now supports the --cancel option, which will cancel the active reassignments
+that are ongoing in a cluster. When stopping an in-progress partition move, the
+--cancel command is designed to restore the replica set to the one it was prior to
+reassignment being initiated. As such, if replicas are being removed from a dead
+broker or an overloaded broker, it may leave the cluster in an undesirable state. There
+is also no guarantee that the reverted replica set will be in the same order as it was
+previously.
+Dumping Log Segments
+On occasion you may have the need to read the specific content of a message, perhaps
+because you ended up with a “poison pill” message in your topic that is corrupted and
+your consumer cannot handle it. The kafka-dump-log.sh tool is provided to decode
+the log segments for a partition. This will allow you to view individual messages
+without needing to consume and decode them. The tool takes a comma-separated list
+of log segment files as an argument and can print out either message summary infor‐
+mation or detailed message data.
+In this example, we will dump the logs from a sample topic, “my-topic, ” which is a
+new topic with only four messages in it. First, we will simply decode the log segment
+file named 00000000000000000000.log and retrieve basic metadata info about each
+message without actually printing the message contents. In our example Kafka instal‐
+lation, the Kafka data directory is set up in /tmp/kafka-logs. As such, our directory for
+finding the log segments will be /tmp/kafka-logs/<topic-name>-<partition>, in this
+case, /tmp/kafka-logs/my-topic-0/:
+# kafka-dump-log.sh --files /tmp/kafka-logs/my-topic-0/00000000000000000000.log
+Dumping /tmp/kafka-logs/my-topic-0/00000000000000000000.log
+Starting offset: 0
+baseOffset: 0 lastOffset: 0 count: 1 baseSequence: -1 lastSequence: -1
+  producerId: -1 producerEpoch: -1 partitionLeaderEpoch: 0
+  isTransactional: false isControl: false position: 0
+  CreateTime: 1623034799990 size: 77 magic: 2
+  compresscodec: NONE crc: 1773642166 isvalid: true
+baseOffset: 1 lastOffset: 1 count: 1 baseSequence: -1 lastSequence: -1
+  producerId: -1 producerEpoch: -1 partitionLeaderEpoch: 0
+  isTransactional: false isControl: false position: 77
+  CreateTime: 1623034803631 size: 82 magic: 2
+  compresscodec: NONE crc: 1638234280 isvalid: true
+baseOffset: 2 lastOffset: 2 count: 1 baseSequence: -1 lastSequence: -1
+  producerId: -1 producerEpoch: -1 partitionLeaderEpoch: 0
+  isTransactional: false isControl: false position: 159
+  CreateTime: 1623034808233 size: 82 magic: 2
+  compresscodec: NONE crc: 4143814684 isvalid: true
+baseOffset: 3 lastOffset: 3 count: 1 baseSequence: -1 lastSequence: -1
+  producerId: -1 producerEpoch: -1 partitionLeaderEpoch: 0
+  isTransactional: false isControl: false position: 241
+  CreateTime: 1623034811837 size: 77 magic: 2
+332 | Chapter 12: Administering Kafka
+
+=== PAGE 362 ===
+  compresscodec: NONE crc: 3096928182 isvalid: true
+#
+In the next example, we add the --print-data-log option, which will provide us the
+actual payload information and more:
+# kafka-dump-log.sh --files /tmp/kafka-logs/my-topic-0/00000000000000000000.log 
+--print-data-log
+Dumping /tmp/kafka-logs/my-topic-0/00000000000000000000.log
+Starting offset: 0
+baseOffset: 0 lastOffset: 0 count: 1 baseSequence: -1 lastSequence: -1
+  producerId: -1 producerEpoch: -1 partitionLeaderEpoch: 0
+  isTransactional: false  isControl: false position: 0
+  CreateTime: 1623034799990 size: 77 magic: 2
+  compresscodec: NONE crc: 1773642166 isvalid: true
+| offset: 0 CreateTime: 1623034799990 keysize: -1 valuesize: 9
+    sequence: -1 headerKeys: [] payload: Message 1
+baseOffset: 1 lastOffset: 1 count: 1 baseSequence: -1 lastSequence: -1
+  producerId: -1 producerEpoch: -1 partitionLeaderEpoch: 0
+  isTransactional: false isControl: false position: 77
+  CreateTime: 1623034803631 size: 82 magic: 2
+  compresscodec: NONE crc: 1638234280 isvalid: true
+| offset: 1 CreateTime: 1623034803631 keysize: -1 valuesize: 14
+    sequence: -1 headerKeys: [] payload: Test Message 2
+baseOffset: 2 lastOffset: 2 count: 1 baseSequence: -1 lastSequence: -1
+  producerId: -1 producerEpoch: -1 partitionLeaderEpoch: 0
+  isTransactional: false isControl: false position: 159
+  CreateTime: 1623034808233 size: 82 magic: 2
+  compresscodec: NONE crc: 4143814684 isvalid: true
+| offset: 2 CreateTime: 1623034808233 keysize: -1 valuesize: 14
+    sequence: -1 headerKeys: [] payload: Test Message 3
+baseOffset: 3 lastOffset: 3 count: 1 baseSequence: -1 lastSequence: -1
+  producerId: -1 producerEpoch: -1 partitionLeaderEpoch: 0
+  isTransactional: false isControl: false position: 241
+  CreateTime: 1623034811837 size: 77 magic: 2
+  compresscodec: NONE crc: 3096928182 isvalid: true
+| offset: 3 CreateTime: 1623034811837 keysize: -1 valuesize: 9
+    sequence: -1 headerKeys: [] payload: Message 4
+#
+The tool also contains a few other useful options, such as validating the index file that
+goes along with a log segment. The index is used for finding messages within a log
+segment, and if corrupted, will cause errors in consumption. Validation is performed
+whenever a broker starts up in an unclean state (i.e., it was not stopped normally),
+but it can be performed manually as well. There are two options for checking indices,
+depending on how much checking you want to do. The option --index-sanity-
+check will just check that the index is in a usable state, while --verify-index-only
+will check for mismatches in the index without printing out all the index entries.
+Another useful option, --value-decoder-class, allows serialized messages to be
+deserialized by passing in a decoder.
+Partition Management | 333
+
+=== PAGE 363 ===
+Replica Verification
+Partition replication works similar to a regular Kafka consumer client: the follower
+broker starts replicating at the oldest offset and checkpoints the current offset to disk
+periodically. When replication stops and restarts, it picks up from the last checkpoint.
+It is possible for previously replicated log segments to get deleted from a broker, and
+the follower will not fill in the gaps in this case.
+To validate that the replicas for a topic’s partitions are the same across the cluster, you
+can use the kafka-replica-verification.sh tool for verification.  This tool will
+fetch messages from all the replicas for a given set of topic partitions, check that all
+messages exist on all replicas, and print out the max lag for given partitions. This pro‐
+cess will operate continuously in a loop until canceled. To do this, you must provide
+an explicit comma-separated list of brokers to connect to. By default, all topics are
+validated; however, you may also provide the tool a regular expression that matches
+the topics you wish to validate.
+Caution: Cluster Impact Ahead
+The replica verification tool will have an impact on your cluster
+similar to reassigning partitions, as it must read all messages from
+the oldest offset in order to verify the replica. In addition, it reads
+from all replicas for a partition in parallel, so it should be used with
+caution.
+For example, verify the replicas for the topics starting with my on kafka brokers 1 and
+2, which contain partition 0 of “my-topic”:
+# kafka-replica-verification.sh --broker-list kafka.host1.domain.com:
+9092,kafka.host2.domain.com:9092
+--topic-white-list 'my.*'
+2021-06-07 03:28:21,829: verification process is started.
+2021-06-07 03:28:51,949: max lag is 0 for partition my-topic-0 at offset 4 
+among 1 partitions
+2021-06-07 03:29:22,039: max lag is 0 for partition my-topic-0 at offset 4 
+among 1 partitions
+...
+#
+Other Tools
+Several more tools are included in the Kafka distribution that are not covered in
+depth in this book that can be useful in administering your Kafka cluster for specific
+use cases. Further information about them can be found on the Apache Kafka
+website:
+334 | Chapter 12: Administering Kafka
+
+=== PAGE 364 ===
+Client ACLs
+A command-line tool, kafka-acls.sh, is provided for interacting with access
+controls for Kafka clients. This includes full features for authorizer properties, set
+up for deny or allow principles, cluster- or topic-level restrictions, ZooKeeper
+TLS file configuration, and much more.
+Lightweight MirrorMaker
+A lightweight kafka-mirror-maker.sh script is available for mirroring data. A
+more in-depth look at replication can be found in Chapter 10.
+Testing tools
+There are several other scripts used for testing Kafka or helping to perform
+upgrades of features. kafka-broker-api-versions.sh helps to easily identify
+different versions of usable API elements when upgrading from one Kafka ver‐
+sion to another and check for compatibility issues. There are producer and con‐
+sumer performance tests scripts. There are several scripts to help administer
+ZooKeeper as well. There is also trogdor.sh, which is a test framework designed
+to run benchmarks and other workloads to attempt to stress test the system.
+Unsafe Operations
+There are some administrative tasks that are technically possible to do but should not
+be attempted except in the most extreme situations. Often this is when you are diag‐
+nosing a problem and have run out of options, or you have found a specific bug that
+you need to work around temporarily. These tasks are usually undocumented, unsup‐
+ported, and pose some amount of risk to your application.
+Several of the more common of these tasks are documented here so that in an emer‐
+gency situation, there is a potential option for recovery. Their use is not recom‐
+mended under normal cluster operations and should be considered carefully before
+being executed.
+Danger: Here Be Dragons
+The operations in this section often involve working with the clus‐
+ter metadata stored in ZooKeeper directly. This can be a very dan‐
+gerous operation, so you must be very careful to not modify the
+information in ZooKeeper directly, except as noted.
+Moving the Cluster Controller
+Every Kafka cluster has a single broker that is designated as a controller. The control‐
+ler has a special thread that is responsible for overseeing cluster operations in addi‐
+tion to normal broker work. Normally, controller election is done automatically
+Unsafe Operations | 335
+
+=== PAGE 365 ===
+through ephemeral ZooKeeper znode monitoring. When a controller turns off or
+becomes unavailable, other brokers nominate themselves as soon as possible, since
+once the controller shuts down, the znode is removed.
+On occasion, when troubleshooting a misbehaving cluster or broker, it may be useful
+to forcibly move the controller to a different broker without shutting down the host.
+One such example is when the controller has suffered an exception or other problem

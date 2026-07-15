@@ -1,0 +1,200 @@
+tool when offsets diverge. These days, mirroring solutions, including Mirror‐
+Maker, use a Kafka topic for storing offset translation metadata. Offsets are
+stored whenever the difference between the two offsets changes. For example, if
+offset 495 on the primary mapped to offset 500 on the DR cluster, we’ll record
+(495,500) in the external store or offset translation topic. If the difference
+changes later due to duplicates and offset 596 is mapped to 600, then we’ll record
+the new mapping (596,600). There is no need to store all the offset mappings
+between 495 and 596; we just assume that the difference remains the same and so
+offset 550 in the primary cluster will map to 555 in the DR. Then when failover
+occurs, instead of mapping timestamps (which are always a bit inaccurate) to off‐
+sets, we map primary offsets to DR offsets and use those. One of the two techni‐
+ques listed previously can be used to force consumers to start using the new
+offsets from the mapping. This still has an issue with offset commits that arrived
+ahead of the records themselves and offset commits that didn’t get mirrored to
+the DR on time, but it covers some cases.
+244 | Chapter 10: Cross-Cluster Data Mirroring
+
+=== PAGE 274 ===
+After the failover
+Let’s say that failover was successful. Everything is working just fine on the DR clus‐
+ter. Now we need to do something with the primary cluster. Perhaps turn it into a DR.
+It is tempting to simply modify the mirroring processes to reverse their direction and
+simply start mirroring from the new primary to the old one. However, this leads to
+two important questions:
+• How do we know where to start mirroring? We need to solve the same problem
+we have for all our consumers for the mirroring application itself. And remember
+that all our solutions have cases where they either cause duplicates or miss data—
+sometimes both.
+• In addition, for reasons we discussed previously, it is likely that your original pri‐
+mary will have events that the DR cluster does not. If you just start mirroring
+new data back, the extra history will remain and the two clusters will be
+inconsistent.
+For this reason, for scenarios where consistency and ordering guarantees are critical,
+the simplest solution is to first scrape the original cluster—delete all the data and
+committed offsets—and then start mirroring from the new primary back to what is
+now the new DR cluster. This gives you a clean slate that is identical to the new
+primary.
+A few words on cluster discovery
+One of the important points to consider when planning a standby cluster is that in
+the event of failover, your applications will need to know how to start communicating
+with the failover cluster. If you hardcoded the hostnames of your primary cluster
+brokers in the producer and consumer properties, this will be challenging. Most
+organizations keep it simple and create a DNS name that usually points to the pri‐
+mary brokers. In case of an emergency, the DNS name can be pointed to the standby
+cluster. The discovery service (DNS or other) doesn’t need to include all the
+brokers—Kafka clients only need to access a single broker successfully in order to get
+metadata about the cluster and discover the other brokers. So, including just three
+brokers is usually fine. Regardless of the discovery method, most failover scenarios
+do require bouncing consumer applications after failover so they can find the new
+offsets from which they need to start consuming. For automated failover without
+application restart to achieve very low RTO, failover logic should be built into client
+applications.
+Multicluster Architectures | 245
+
+=== PAGE 275 ===
+Stretch Clusters
+Active-standby architectures are used to protect the business against the failure of a
+Kafka cluster by moving applications to communicate with another cluster in case of
+cluster failure. Stretch clusters are intended to protect the Kafka cluster from failure
+during a datacenter outage. This is achieved by installing a single Kafka cluster across
+multiple datacenters.
+Stretch clusters are fundamentally different from other multidatacenter scenarios. To
+start with, they are not multicluster—it is just one cluster. As a result, we don’t need a
+mirroring process to keep two clusters in sync. Kafka’s normal replication mechanism
+is used, as usual, to keep all brokers in the cluster in sync. This setup can include syn‐
+chronous replication. Producers normally receive an acknowledgment from a Kafka
+broker after the message was successfully written to Kafka. In the stretch cluster case,
+we can configure things so the acknowledgment will be sent after the message is writ‐
+ten successfully to Kafka brokers in two datacenters. This involves using rack defini‐
+tions to make sure each partition has replicas in multiple datacenters, and the use of
+min.insync.replicas and acks=all to ensure that every write is acknowledged from
+at least two datacenters. From 2.4.0 onward, brokers can also be configured to enable
+consumers to fetch from the closest replica using rack definitions. Brokers match
+their rack with that of the consumer to find the local replica that is most up-to-date,
+falling back to the leader if a suitable local replica is not available. Consumers fetch‐
+ing from followers in their local datacenter achieve higher throughput, lower latency,
+and lower cost by reducing cross-datacenter traffic.
+The advantages of this architecture are in the synchronous replication—some types
+of business simply require that their DR site is always 100% synchronized with the
+primary site. This is often a legal requirement and is applied to any data store across
+the company—Kafka included. The other advantage is that both datacenters and all
+brokers in the cluster are used. There is no waste like we saw in active-standby
+architectures.
+This architecture is limited in the type of disasters it protects against. It only protects
+from datacenter failures, not any kind of application or Kafka failures. The opera‐
+tional complexity is also limited. This architecture demands physical infrastructure
+that not all companies can provide.
+This architecture is feasible if you can install Kafka (and ZooKeeper) in at least three
+datacenters with high bandwidth and low latency between them. This can be done if
+your company owns three buildings on the same street, or—more commonly—by
+using three availability zones inside one region of your cloud provider.
+246 | Chapter 10: Cross-Cluster Data Mirroring
+
+=== PAGE 276 ===
+The reason three datacenters are important is because ZooKeeper requires an uneven
+number of nodes in a cluster and will remain available if a majority of the nodes are
+available. With two datacenters and an uneven number of nodes, one datacenter will
+always contain a majority, which means that if this datacenter is unavailable, Zoo‐
+Keeper is unavailable, and Kafka is unavailable. With three datacenters, you can easily
+allocate nodes so no single datacenter has a majority. So, if one datacenter is unavail‐
+able, a majority of nodes exist in the other two datacenters, and the ZooKeeper cluster
+will remain available. Therefore, so will the Kafka cluster.
+2.5 DC Architecture
+A popular model for stretch clusters is a 2.5 DC (datacenter) archi‐
+tecture with both Kafka and ZooKeeper running in two datacen‐
+ters, and a third “0.5” datacenter with one ZooKeeper node to
+provide quorum if a datacenter fails.
+It is possible to run ZooKeeper and Kafka in two datacenters using a ZooKeeper
+group configuration that allows for manual failover between two datacenters. How‐
+ever, this setup is uncommon.
+Apache Kafka’s MirrorMaker
+Apache Kafka contains a tool called MirrorMaker for mirroring data between two
+datacenters. Early versions of MirrorMaker used a collection of consumers that were
+members of a consumer group to read data from a set of source topics and a shared
+Kafka producer in each MirrorMaker process to send those events to the destination
+cluster. While this was sufficient to mirror data across clusters in some scenarios, it
+had several issues, particularly latency spikes as configuration changes and addition
+of new topics resulted in stop-the-world rebalances. MirrorMaker 2.0 is the next-
+generation multicluster mirroring solution for Apache Kafka that is based on the
+Kafka Connect framework, overcoming many of the shortcomings of its predecessor.
+Complex topologies can be easily configured to support a wide range of use cases like
+disaster recovery, backup, migration, and data aggregation.
+More about MirrorMaker
+MirrorMaker sounds very simple, but because we were trying to be
+very efficient and get very close to exactly-once delivery, it turned
+out to be tricky to implement correctly. MirrorMaker has been
+rewritten multiple times. The description here and the details in
+the following sections apply to MirrorMaker 2.0, which was intro‐
+duced in 2.4.0.
+Apache Kafka’s MirrorMaker | 247
+
+=== PAGE 277 ===
+MirrorMaker uses a source connector to consume data from another Kafka cluster
+rather than from a database. Use of the Kafka Connect framework minimizes admin‐
+istration overhead for busy enterprise IT departments. If you recall the Kafka Con‐
+nect architecture from Chapter 9 , you remember that each connector divides the
+work among a configurable number of tasks. In MirrorMaker, each task is a con‐
+sumer and a producer pair. The Connect framework assigns those tasks to different
+Connect worker nodes as needed—so you may have multiple tasks on one server or
+have the tasks spread out to multiple servers. This replaces the manual work of figur‐
+ing out how many MirrorMaker streams should run per instance and how many
+instances per machine. Connect also has a REST API to centrally manage the
+configuration for the connectors and tasks. If we assume that most Kafka deploy‐
+ments include Kafka Connect for other reasons (sending database change events into
+Kafka is a very popular use case), then by running MirrorMaker inside Connect, we
+can cut down on the number of clusters we need to manage.
+MirrorMaker allocates partitions to tasks evenly without using Kafka’s consumer
+group-management protocol to avoid latency spikes due to rebalances when new top‐
+ics or partitions are added. Events from each partition in the source cluster are mir‐
+rored to the same partition in the target cluster, preserving semantic partitioning and
+maintaining ordering of events for each partition. If new partitions are added to
+source topics, they are automatically created in the target topic. In addition to data
+replication, MirrorMaker also supports migration of consumer offsets, topic configu‐
+ration, and topic ACLs, making it a complete mirroring solution for multicluster
+deployments. A replication flow defines the configuration of a directional flow from a
+source cluster to a target cluster. Multiple replication flows can be defined for Mirror‐
+Maker to define complex topologies, including the architectural patterns we dis‐
+cussed earlier like hub-and-spoke, active-standby, and active-active architectures.
+Figure 10-6 shows the use of MirrorMaker in an active-standby architecture.
+Figure 10-6. The MirrorMaker process in Kafka
+248 | Chapter 10: Cross-Cluster Data Mirroring
+
+=== PAGE 278 ===
+Configuring MirrorMaker
+MirrorMaker is highly configurable. In addition to the cluster settings to define the
+topology, Kafka Connect, and connector settings, every configuration property of the
+underlying producer, consumers, and admin client used by MirrorMaker can be cus‐
+tomized. We will show a few examples here and highlight some of the important con‐
+figuration options, but exhaustive documentation of MirrorMaker is outside our
+scope.
+With that in mind, let’s take a look at a MirrorMaker example. The following com‐
+mand starts MirrorMaker with the configuration options specified in the properties
+file:
+bin/connect-mirror-maker.sh etc/kafka/connect-mirror-maker.properties
+Let’s look at some of MirrorMaker’s configuration options:
+Replication flow
+The following example shows the configuration options for setting up an active-
+standby replication flow between two datacenters in New Y ork and London:
+clusters = NYC, LON                                 
+NYC.bootstrap.servers = kafka.nyc.example.com:9092  
+LON.bootstrap.servers = kafka.lon.example.com:9092
+NYC->LON.enabled = true                             
+NYC->LON.topics = .*                                
+Define aliases for the clusters used in replication flows.
+Configure bootstrap for each cluster, using the cluster alias as the prefix.
+Enable replication flow between a pair of clusters using the prefix source
+->target. All configuration options for this flow use the same prefix.
+Configure the topics to be mirrored for this replication flow.
+Mirror topics
+As shown in the example, for each replication flow, a regular expression may be
+specified for the topic names that will be mirrored. In this example, we chose to
+replicate every topic, but it is often good practice to use something like prod.*
+and avoid replicating test topics. A separate topic exclusion list containing topic
+names or patterns like test.* may also be specified to exclude topics that don’t
+require mirroring. Target topic names are automatically prefixed with the source
+cluster alias by default. For example, in active-active architecture, MirrorMaker
+replicating topics from an NYC datacenter to a LON datacenter will mirror the
+topic orders from NYC to the topic NYC.orders in LON. This default naming
+strategy prevents replication cycles resulting in events being endlessly mirrored
+Apache Kafka’s MirrorMaker | 249

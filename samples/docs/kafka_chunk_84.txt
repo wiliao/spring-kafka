@@ -1,0 +1,200 @@
+chroot path for Kafka cluster, 26
+CLI (command-line interface) utilities
+checking Kafka version for, 306
+for making admin changes, 305
+clickstream enrichment example (Kafka
+Streams), 408-410
+client APIs, 47
+client ID versus consumer groups, 318
+client libraries, 431
+client.dns.lookup configuration, 116
+DNS name with multiple IP addresses, 117
+use of DNS aliases, 116
+client.id parameter, 55, 93
+client.rack parameter, 93
+clients
+ACLs, tool for, 335
+built-in Kafka client APIs, 47
+configuration defaults, overriding, 317
+configurations (keys) for, 317
+establishing authenticity of, 267
+Index | 435
+
+=== PAGE 465 ===
+filtering of topics for subscriptions on client
+side, 85
+Java, JMX metrics allowing client-side mon‐
+itoring, 178
+languages Kafka clients are written in, 142
+monitoring, 370-376
+consumer metrics, 373-377
+producer metrics, 370-373
+most common types of requests, 143
+producer and consumer versus Kafka Con‐
+nect, 210
+quotas applied to, 73
+retrieving passwords from third-party store,
+301
+SSL authentication, 271
+third-party, 48
+throttling of requests by brokers, 74
+cloud computing
+cloud migrations, use of cross-cluster mir‐
+roring, 234
+cloud services for Kafka, 16
+installing Kafka in, 35
+Cluster Linking, 262
+clusters, 8
+checking metadata, 127
+cluster discovery, 245
+cluster-level problems, 350
+exceeding capacity of brokers to serve
+requests, 351
+helpers for balancing clusters, 351
+unbalanced partitions or leadership, 350
+configuring, 36-42
+broker configuration, 38
+Linux OS, tuning, 38-42
+number of brokers, 37
+copying data from one Kafka cluster to
+another, 192
+data flow in Kafka cluster, 266
+diagnosing cluster problems, 347
+impact of replica verification on, 334
+membership in, 135
+monitoring, 378
+multicluster architectures, 235-247
+multiple, 9
+poorly balanced, throttling behavior in, 317
+size of, 149
+tiered storage, 150
+tools for deployment and management of,
+429
+command-line interface (CLI) utilities
+checking Kafka version for, 306
+for making admin changes, 305
+commit log, 13
+commitAsync method, 98
+combining with commitSync, 99
+committing a specified offset, 100
+commitSync method, 96, 103
+committed messages, 162
+commitTransaction method, 199
+community-developed external secret config
+providers, 209
+compact retention policy, 156
+compacted topics, 400
+compaction, 156-158
+how it works, 156
+logging information on log compaction
+threads, 369
+timing of topic compaction, 159
+compression
+of encrypted messages, 291
+compression.type parameter, 59
+compromised users, 287
+concurrent mark and sweep garbage collection,
+43
+ConfigResource, 121-123
+Configurable interface, 72
+configuration
+dynamic changes in, 315-320
+describing configuration overrides, 319
+overriding broker configuration defaults,
+318
+overriding client and user configuration
+defaults, 317
+overriding topic configuration defaults,
+315
+removing configuration overrides, 319
+validating for brokers and clients, 176
+configuration management, 121-123
+configuration management systems, 354
+configuration prefixes in MirrorMaker, 251
+Confluent, 16
+cross-datacenter mirroring solutions, 261
+Confluent Control Center, 256
+Confluent Hub, downloading connectors from,
+216
+Confluent Replicator, 261
+features supported, 261
+Confluent Schema Registry, 65
+436 | Index
+
+=== PAGE 466 ===
+Avro, Protobuf, and JSON Schema convert‐
+ers, 211
+use of topic to store configuration, 118
+Confluent Server, 261, 262
+Connect API, 204
+(see also Kafka Connect)
+data model, 227
+connection.failed.authentication.delay.ms, 274
+connection.url parameter, 221
+connections.max.reauth.ms parameter, 286,
+287
+connector plug-ins, 211
+connectors, 211
+(see also Kafka Connect)
+building your own, 223
+deleting, 216
+responsibilities, 226
+tasks in MirrorMaker, 250
+console consumer, 322-326
+consuming offsets topics, 325
+message formatter options, 324
+using consumer configuration options, 323
+console producer, 73, 320-322
+line-reader options, 322
+using producer configuration options, 321
+ConsoleProducer$LineMessageReader, 322
+consume locally and produce remotely
+approach, 254
+consume quotas, 73
+consumer coordination, 415
+consumer groups, 7, 78, 312-315
+client ID versus, 318
+deleting, 313
+listing and describing, 312
+fields provided for my-consumer group,
+313
+managing, 123-126
+modifying consumer groups, 125-126
+offset management, 314
+exporting offsets, 314
+importing offsets, 314
+ZooKeeper-based, 312
+__consumer_offsets topic, 188, 242, 250, 325
+consumer.assign method, 111
+consumer.assignment method, 104
+consumer.close method, 105
+consumer.partitionsFor method, 111
+consumer.poll method, 190
+consumer.wakeup method, 105
+ConsumerRebalanceListener class, 101-103
+onPartitionsAssigned method, 101
+onPartitionsLost method, 102
+onPartitionsRevoked method, 101
+committing offsets before losing parti‐
+tion ownership, 102
+consumers, 6, 77-112
+commits and offsets, 94-101
+committing a specified offset, 100
+concepts, 77-84
+consumer groups and partition balance,
+80-83
+consumers and consumer groups, 77-80
+static group membership, 83
+configuration validation with Verifiable‐
+Consumer, 176
+configuring, 88-94
+consumer lag metric, 178
+consuming records with specific offsets, 104
+creating in Kafka, 84
+deciding when to use Kafka Connect instead
+of, 210
+defined, 7
+deserializers, 106-110
+custom, 107-109
+using Avro deserialization, 109
+exiting the poll loop, 105

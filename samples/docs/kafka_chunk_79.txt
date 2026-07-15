@@ -1,0 +1,200 @@
+                    StreamJoined.with(Serdes.Integer(),  
+                                      new UserActivitySerde(),
+                                      new SearchSerde()));
+First, we create a streams objects for the two streams we want to join—clicks and
+searches. When we create the stream object, we pass the input topic and the key
+and value Serde that will be used when consuming records out of the topic and
+deserializing them into input objects.
+We also define a KTable for the user profiles. A KTable is a materialized store that
+is updated through a stream of changes.
+Then we enrich the stream of clicks with user profile information by joining the
+stream of events with the profile table. In a stream-table join, each event in the
+stream receives information from the cached copy of the profile table. We are
+doing a left-join, so clicks without a known user will be preserved.
+This is the join method—it takes two values, one from the stream and one from
+the record, and returns a third value. Unlike in databases, we get to decide how to
+combine the two values into one result. In this case, we created one activity
+object that contains both the user details and the page viewed.
+Next, we want to join the click information with searches performed by the same
+user. This is still a left join, but now we are joining two streams, not streaming to
+a table.
+This is the join method—we simply add the search terms to all the matching
+page views.
+This is the interesting part—a stream-to-stream join is a join with a time window.
+Joining all clicks and searches for each user doesn’t make much sense—we want
+to join each search with clicks that are related to it, that is, clicks that occurred a
+short period of time after the search. So we define a join window of one second.
+We invoke of to create a window of one second before and after each search, and
+then we call before with a zero-seconds interval to make sure we only join clicks
+that happen one second after each search and not before. The results will include
+relevant clicks, search terms, and the user profile. This will allow a full analysis of
+searches and their results.
+We define the Serde of the join result here. This includes a Serde for the key that
+both sides of the join have in common and the Serde for both values that will be
+included in the result of the join. In this case, the key is the user ID, so we use a
+simple Integer Serde.
+Kafka Streams by Example | 409
+
+=== PAGE 439 ===
+After we define the flow, we use it to generate a KafkaStreams object and run it, just
+like we did in “Word Count” on page 402.
+This example shows two different join patterns possible in stream processing. One
+joins a stream with a table to enrich all streaming events with information in the
+table. This is similar to joining a fact table with a dimension when running queries on
+a data warehouse. The second example joins two streams based on a time window.
+This operation is unique to stream processing.
+As usual, you can find the complete example, including instructions for running it,
+on GitHub.
+Kafka Streams: Architecture Overview
+The examples in the previous section demonstrated how to use the Kafka Streams
+API to implement a few well-known stream processing design patterns. But to under‐
+stand better how Kafka’s Streams library actually works and scales, we need to peek
+under the covers and understand some of the design principles behind the API.
+Building a Topology
+Every streams application implements and executes one topology. Topology (also
+called DAG, or directed acyclic graph, in other stream processing frameworks) is a set
+of operations and transitions that every event moves through from input to output.
+Figure 14-10 shows the topology in “Word Count” on page 402.
+Figure 14-10. Topology for the word-count stream processing example
+Even a simple app has a nontrivial topology. The topology is made up of processors—
+those are the nodes in the topology graph (represented by circles in our diagram).
+Most processors implement an operation of the data—filter, map, aggregate, etc.
+There are also source processors, which consume data from a topic and pass it on,
+and sink processors, which take data from earlier processors and produce it to a
+410 | Chapter 14: Stream Processing
+
+=== PAGE 440 ===
+topic. A topology always starts with one or more source processors and finishes with
+one or more sink processors.
+Optimizing a Topology
+By default, Kafka Streams executes applications that were built with the DSL API by
+mapping each DSL method independently to a lower-level equivalent.  By evaluating
+each DSL method independently, opportunities to optimize the overall resulting top‐
+ology were missed.
+However, note that the execution of a Kafka Streams application is a three-step
+process:
+1. The logical topology is defined by creating KStream and KTable objects and per‐
+forming DSL operations, such as filter and join, on them.
+2. StreamsBuilder.build() generates a physical topology from the logical
+topology.
+3. KafkaStreams.start() executes the topology—this is where data is consumed,
+processed, and produced.
+The second step, where the physical topology is generated from the logical defini‐
+tions, is where overall optimizations to the plan can be applied.
+Currently, Apache Kafka only contains a few optimizations, mostly around reusing
+topics where possible. These can be enabled by setting StreamsConfig.
+TOPOLOGY_OPTIMIZATION to StreamsConfig.OPTIMIZE and calling build(props). If
+you only call build() without passing the config, optimization is still disabled. It is
+recommended to test applications with and without optimizations and to compare
+execution times and volumes of data written to Kafka, and of course, validate that the
+results are identical in various known scenarios.
+Testing a Topology
+Generally speaking, we want to test software before using it in scenarios where its
+successful execution is important. Automated testing is considered the gold standard.
+Repeatable tests that are evaluated every time a change is made to a software applica‐
+tion or library enable fast iterations and easier troubleshooting.
+We want to apply the same kind of methodology to our Kafka Streams applications.
+In addition to automated end-to-end tests that run the stream processing application
+against a staging environment with generated data, we’ll want to also include faster,
+lighter-weight, and easier-to-debug unit and integration tests.
+Kafka Streams: Architecture Overview | 411
+
+=== PAGE 441 ===
+The main testing tool for Kafka Streams applications is TopologyTestDriver. Since
+its introduction in version 1.1.0, its API has undergone significant improvements,
+and versions since 2.4 are convenient and easy to use. These tests look like normal
+unit tests. We define input data, produce it to mock input topics, run the topology
+with the test driver, read the results from mock output topics, and validate the result
+by comparing it to expected values.
+We recommend using the TopologyTestDriver for testing stream processing applica‐
+tions, but since it does not simulate Kafka Streams caching behavior (an optimization
+not discussed in this book, entirely unrelated to the state store itself, which is simula‐
+ted by this framework), there are entire classes of errors that it will not detect.
+Unit tests are typically complemented by integration tests, and for Kafka Streams,
+there are two popular integration test frameworks: EmbeddedKafkaCluster and Test
+containers. The former runs Kafka brokers inside the JVM that runs the tests, while
+the latter runs Docker containers with Kafka brokers (and many other components,
+as needed for the tests). Testcontainers is recommended, since by using Docker it
+fully isolates Kafka, its dependencies, and its resource usage from the application we
+are trying to test.
+This is just a short overview of Kafka Streams testing methodologies. We recommend
+reading the “Testing Kafka Streams—A Deep Dive” blog post for deeper explanations
+and detailed code examples of topologies and tests.
+Scaling a Topology
+Kafka Streams scales by allowing multiple threads of executions within one instance
+of the application and by supporting load balancing between distributed instances of
+the application. We can run the Streams application on one machine with multiple
+threads or on multiple machines; in either case, all active threads in the application
+will balance the work involved in data processing.
+The Streams engine parallelizes execution of a topology by splitting it into tasks.  The
+number of tasks is determined by the Streams engine and depends on the number of
+partitions in the topics that the application processes. Each task is responsible for a
+subset of the partitions: the task will subscribe to those partitions and consume events
+from them. For every event it consumes, the task will execute all the processing steps
+that apply to this partition in order before eventually writing the result to the sink.
+Those tasks are the basic unit of parallelism in Kafka Streams, because each task can
+execute independently of others. See Figure 14-11.
+412 | Chapter 14: Stream Processing
+
+=== PAGE 442 ===
+Figure 14-11. Two tasks running the same topology—one for each partition in the input
+topic
+The developer of the application can choose the number of threads each application
+instance will execute. If multiple threads are available, every thread will execute a
+subset of the tasks that the application creates. If multiple instances of the application
+are running on multiple servers, different tasks will execute for each thread on each
+server. This is the way streaming applications scale: we will have as many tasks as we
+have partitions in the topics we are processing. If we want to process faster, add more
+threads. If we run out of resources on the server, start another instance of the applica‐
+tion on another server. Kafka will automatically coordinate work—it will assign each
+task its own subset of partitions, and each task will independently process events
+from those partitions and maintain its own local state with relevant aggregates if the
+topology requires this. See Figure 14-12.
+Sometimes a processing step may require input from multiple partitions, which could
+create dependencies between tasks. For example, if we join two streams, as we did in
+the ClickStream example in “ClickStream Enrichment” on page 408, we need data
+from a partition in each stream before we can emit a result. Kafka Streams handles
+this situation by assigning all the partitions needed for one join to the same task so
+that the task can consume from all the relevant partitions and perform the join inde‐
+pendently. This is why Kafka Streams currently requires that all topics that participate
+in a join operation have the same number of partitions and be partitioned based on
+the join key.
+Kafka Streams: Architecture Overview | 413
+
+=== PAGE 443 ===
+Figure 14-12. The stream processing tasks can run on multiple threads and multiple
+servers
+Another example of dependencies between tasks is when our application requires
+repartitioning. For instance, in the ClickStream example, all our events are keyed by
+the user ID. But what if we want to generate statistics per page? Or per zip code?
+Kafka Streams will repartition the data by zip code and run an aggregation of the data
+with the new partitions. If task 1 processes the data from partition 1 and reaches a
+processor that repartitions the data ( groupBy operation), it will need to shuffle, or
+send events to other tasks. Unlike other stream processor frameworks, Kafka Streams
+repartitions by writing the events to a new topic with new keys and partitions. Then
+another set of tasks reads events from the new topic and continues processing. The
+repartitioning steps break our topology into two subtopologies, each with its own
+tasks. The second set of tasks depends on the first, because it processes the results of
+the first subtopology. However, the first and second sets of tasks can still run inde‐
+pendently and in parallel because the first set of tasks writes data into a topic at its
+own rate and the second set consumes from the topic and processes the events on its
+own. There is no communication and no shared resources between the tasks, and
+they don’t need to run on the same threads or servers. This is one of the more useful
+414 | Chapter 14: Stream Processing
+
+=== PAGE 444 ===
+things Kafka does—reduce dependencies between different parts of a pipeline. See
+Figure 14-13.
+Figure 14-13. Two sets of tasks processing events with a topic for repartitioning events
+between them
+Surviving Failures
+The same model that allows us to scale our application also allows us to gracefully
+handle failures. First, Kafka is highly available, and therefore the data we persist to
+Kafka is also highly available. So if the application fails and needs to restart, it can
+look up its last position in the stream from Kafka and continue its processing from
+the last offset it committed before failing. Note that if the local state store is lost (e.g.,
+because we needed to replace the server it was stored on), the streams application can
+always re-create it from the change log it stores in Kafka.
+Kafka Streams also leverages Kafka’s consumer coordination to provide high availa‐
+bility for tasks. If a task failed but there are threads or other instances of the streams
+application that are active, the task will restart on one of the available threads. This is

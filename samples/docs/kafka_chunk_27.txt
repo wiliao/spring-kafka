@@ -1,0 +1,200 @@
+you may need to describe the topic and find out how many parti‐
+tions exist prior to expanding it.
+Deleting Records from a Topic
+Current privacy laws mandate specific retention policies for data. Unfortunately,
+while Kafka has retention policies for topics, they were not implemented in a way that
+guarantees legal compliance. A topic with a retention policy of 30 days can store older
+data if all the data fits into a single segment in each partition.
+The deleteRecords method will mark as deleted all the records with offsets older
+than those specified when calling the method and make them inaccessible by Kafka
+consumers. The method returns the highest deleted offsets, so we can check if the
+deletion indeed happened as expected. Full cleanup from disk will happen asynchro‐
+nously. Remember that the listOffsets method can be used to get offsets for
+records that were written on or immediately after a specific time. Together, these
+methods can be used to delete records older than any specific point in time:
+Map<TopicPartition, ListOffsetsResult.ListOffsetsResultInfo> olderOffsets =
+        admin.listOffsets(requestOlderOffsets).all().get();
+Map<TopicPartition, RecordsToDelete> recordsToDelete = new HashMap<>();
+for (Map.Entry<TopicPartition, ListOffsetsResult.ListOffsetsResultInfo>  e:
+        olderOffsets.entrySet())
+    recordsToDelete.put(e.getKey(),
+            RecordsToDelete.beforeOffset(e.getValue().offset()));
+ admin.deleteRecords(recordsToDelete).all().get();
+Leader Election
+This method allows you to trigger two different types of leader election:
+Preferred leader election
+Each partition has a replica that is designated as the preferred leader. It is prefer‐
+red because if all partitions use their preferred leader replica as the leader, the
+number of leaders on each broker should be balanced. By default, Kafka will
+check every five minutes if the preferred leader replica is indeed the leader, and if
+it isn’t but it is eligible to become the leader, it will elect the preferred leader rep‐
+lica as leader. If auto.leader.rebalance.enable is false, or if you want this to
+happen faster, the electLeader() method can trigger this process.
+128 | Chapter 5: Managing Apache Kafka Programmatically
+
+=== PAGE 158 ===
+Unclean leader election
+If the leader replica of a partition becomes unavailable, and the other replicas are
+not eligible to become leaders (usually because they are missing data), the parti‐
+tion will be without a leader and therefore unavailable.  One way to resolve this is
+to trigger unclean leader election, which means electing a replica that is otherwise
+ineligible to become a leader as the leader anyway. This will cause data loss—all
+the events that were written to the old leader and were not replicated to the new
+leader will be lost. The electLeader() method can also be used to trigger
+unclean leader elections.
+The method is asynchronous, which means that even after it returns successfully, it
+takes a while until all brokers become aware of the new state, and calls to describe
+Topics() can return inconsistent results. If you trigger leader election for multiple
+partitions, it is possible that the operation will be successful for some partitions and
+fail for others:
+Set<TopicPartition> electableTopics = new HashSet<>();
+electableTopics.add(new TopicPartition(TOPIC_NAME, 0));
+try {
+    admin.electLeaders(ElectionType.PREFERRED, electableTopics).all().get(); 
+} catch (ExecutionException e) {
+    if (e.getCause() instanceof ElectionNotNeededException) {
+        System.out.println("All leaders are preferred already"); 
+    }
+}
+We are electing the preferred leader on a single partition of a specific topic. We
+can specify any number of partitions and topics. If you call the command with
+null instead of a collection of partitions, it will trigger the election type you
+chose for all partitions.
+If the cluster is in a healthy state, the command will do nothing. Preferred leader
+election and unclean leader election only take effect when a replica other than the
+preferred leader is the current leader.
+Reassigning Replicas
+Sometimes, you don’t like the current location of some of the replicas. Maybe a
+broker is overloaded and you want to move some replicas. Maybe you want to add
+more replicas. Maybe you want to move all replicas from a broker so you can remove
+the machine. Or maybe a few topics are so noisy that you need to isolate them from
+the rest of the workload. In all these scenarios, alterPartitionReassignments gives
+you fine-grain control over the placement of every single replica for a partition.  Keep
+in mind that reassigning replicas from one broker to another may involve copying
+large amounts of data from one broker to another. Be mindful of the available
+Advanced Admin Operations | 129
+
+=== PAGE 159 ===
+network bandwidth, and throttle replication using quotas if needed; quotas are a
+broker configuration, so you can describe them and update them with AdminClient.
+For this example, assume that we have a single broker with ID 0. Our topic has sev‐
+eral partitions, all with one replica on this broker. After adding a new broker, we want
+to use it to store some of the replicas of the topic. We are going to assign each parti‐
+tion in the topic in a slightly different way:
+Map<TopicPartition, Optional<NewPartitionReassignment>> reassignment = new Hash-
+Map<>();
+reassignment.put(new TopicPartition(TOPIC_NAME, 0),
+        Optional.of(new NewPartitionReassignment(Arrays.asList(0,1)))); 
+reassignment.put(new TopicPartition(TOPIC_NAME, 1),
+        Optional.of(new NewPartitionReassignment(Arrays.asList(1)))); 
+reassignment.put(new TopicPartition(TOPIC_NAME, 2),
+        Optional.of(new NewPartitionReassignment(Arrays.asList(1,0)))); 
+reassignment.put(new TopicPartition(TOPIC_NAME, 3), Optional.empty()); 
+admin.alterPartitionReassignments(reassignment).all().get();
+System.out.println("currently reassigning: " +
+        admin.listPartitionReassignments().reassignments().get()); 
+demoTopic = admin.describeTopics(TOPIC_LIST);
+topicDescription = demoTopic.values().get(TOPIC_NAME).get();
+System.out.println("Description of demo topic:" + topicDescription); 
+We’ve added another replica to partition 0, placed the new replica on the new
+broker, which has ID 1, but left the leader unchanged.
+We didn’t add any replicas to partition 1; we simply moved the one existing rep‐
+lica to the new broker. Since we have only one replica, it is also the leader.
+We’ve added another replica to partition 2 and made it the preferred leader. The
+next preferred leader election will switch leadership to the new replica on the
+new broker. The existing replica will then become a follower.
+There is no ongoing reassignment for partition 3, but if there was, this would
+have canceled it and returned the state to what it was before the reassignment
+operation started.
+We can list the ongoing reassignments.
+We can also print the new state, but remember that it can take awhile until it
+shows consistent results.
+130 | Chapter 5: Managing Apache Kafka Programmatically
+
+=== PAGE 160 ===
+Testing
+Apache Kafka provides a test class, MockAdminClient, which you can initialize with
+any number of brokers and use to test that your applications behave correctly without
+having to run an actual Kafka cluster and really perform the admin operations on it.
+While MockAdminClient is not part of the Kafka API and therefore subject to change
+without warning, it mocks methods that are public, and therefore the method signa‐
+tures will remain compatible. There is a bit of a trade-off on whether the convenience
+of this class is worth the risk that it will change and break your tests, so keep this in
+mind.
+What makes this test class especially compelling is that some of the common methods
+have very comprehensive mocking: you can create topics with MockAdminClient, and
+a subsequent call to listTopics() will list the topics you “created. ”
+However, not all methods are mocked. If you use AdminClient with version 2.5 or
+earlier and call incrementalAlterConfigs() of the MockAdminClient, you will get an
+UnsupportedOperationException, but you can handle this by injecting your own
+implementation.
+To demonstrate how to test using MockAdminClient, let’s start by implementing a
+class that is instantiated with an admin client and uses it to create topics:
+public TopicCreator(AdminClient admin) {
+    this.admin = admin;
+}
+// Example of a method that will create a topic if its name starts with "test"
+public void maybeCreateTopic(String topicName)
+        throws ExecutionException, InterruptedException {
+    Collection<NewTopic> topics = new ArrayList<>();
+    topics.add(new NewTopic(topicName, 1, (short) 1));
+    if (topicName.toLowerCase().startsWith("test")) {
+        admin.createTopics(topics);
+        // alter configs just to demonstrate a point
+        ConfigResource configResource =
+                  new ConfigResource(ConfigResource.Type.TOPIC, topicName);
+        ConfigEntry compaction =
+                  new ConfigEntry(TopicConfig.CLEANUP_POLICY_CONFIG,
+                          TopicConfig.CLEANUP_POLICY_COMPACT);
+        Collection<AlterConfigOp> configOp = new ArrayList<AlterConfigOp>();
+        configOp.add(new AlterConfigOp(compaction, AlterConfigOp.OpType.SET));
+        Map<ConfigResource, Collection<AlterConfigOp>> alterConf =
+            new HashMap<>();
+        alterConf.put(configResource, configOp);
+        admin.incrementalAlterConfigs(alterConf).all().get();
+    }
+}
+Testing | 131
+
+=== PAGE 161 ===
+The logic here isn’t sophisticated: maybeCreateTopic will create the topic if the topic
+name starts with “test. ” We are also modifying the topic configuration, so we can
+show how to handle a case where the method we use isn’t implemented in the mock
+client.
+We are using the Mockito testing framework to verify that the Mock
+AdminClient methods are called as expected and to fill in for the
+unimplemented methods. Mockito is a fairly simple mocking
+framework with nice APIs, which makes it a good fit for a small
+example of a unit test.
+We’ll start testing by instantiating our mock client:
+@Before
+public void setUp() {
+    Node broker = new Node(0,"localhost",9092);
+    this.admin = spy(new MockAdminClient(Collections.singletonList(broker),
+        broker)); 
+    // without this, the tests will throw
+    // `java.lang.UnsupportedOperationException: Not implemented yet`
+    AlterConfigsResult emptyResult = mock(AlterConfigsResult.class);
+    doReturn(KafkaFuture.completedFuture(null)).when(emptyResult).all();
+    doReturn(emptyResult).when(admin).incrementalAlterConfigs(any()); 
+}
+MockAdminClient is instantiated with a list of brokers (here we’re using just one),
+and one broker that will be our controller. The brokers are just the broker ID,
+hostname, and port—all fake, of course. No brokers will run while executing
+these tests. We’ll use Mockito’s spy injection, so we can later check that Topic
+Creator executed correctly.
+Here we use Mockito’s doReturn methods to make sure the mock admin client
+doesn’t throw exceptions. The method we are testing expects the AlterConfig
+Result object with an all() method that returns a KafkaFuture. We made sure
+that the fake incrementalAlterConfigs returns exactly that.
+Now that we have a properly fake AdminClient, we can use it to test whether the
+maybeCreateTopic() method works properly:
+@Test
+public void testCreateTestTopic()
+        throws ExecutionException, InterruptedException {
+    TopicCreator tc = new TopicCreator(admin);
+    tc.maybeCreateTopic("test.is.a.test.topic");
+    verify(admin, times(1)).createTopics(any()); 
+}
+132 | Chapter 5: Managing Apache Kafka Programmatically
+

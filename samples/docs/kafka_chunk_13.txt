@@ -1,0 +1,200 @@
+or in the brokers themselves, we may still get an exception if the producer
+encountered errors before sending the message to Kafka. Those can be, for exam‐
+ple, a SerializationException when it fails to serialize the message, a Buffer
+ExhaustedException or TimeoutException if the buffer is full, or an
+InterruptException if the sending thread was interrupted.
+Sending a Message Synchronously
+Sending a message synchronously is simple but still allows the producer to catch
+exceptions when Kafka responds to the produce request with an error, or when send
+retries were exhausted. The main trade-off involved is performance. Depending on
+how busy the Kafka cluster is, brokers can take anywhere from 2 ms to a few seconds
+to respond to produce requests. If you send messages synchronously, the sending
+thread will spend this time waiting and doing nothing else, not even sending
+additional messages. This leads to very poor performance, and as a result,
+52 | Chapter 3: Kafka Producers: Writing Messages to Kafka
+
+=== PAGE 82 ===
+synchronous sends are usually not used in production applications (but are very
+common in code examples).
+The simplest way to send a message synchronously is as follows:
+ProducerRecord<String, String> record =
+    new ProducerRecord<>("CustomerCountry", "Precision Products", "France");
+try {
+    producer.send(record).get(); 
+} catch (Exception e) {
+    e.printStackTrace(); 
+}
+Here, we are using Future.get() to wait for a reply from Kafka. This method
+will throw an exception if the record is not sent successfully to Kafka. If there
+were no errors, we will get a RecordMetadata object that we can use to retrieve
+the offset the message was written to and other metadata.
+If there were any errors before or while sending the record to Kafka, we will
+encounter an exception. In this case, we just print any exception we ran into.
+KafkaProducer has two types of errors. Retriable errors are those that can be resolved
+by sending the message again. For example, a connection error can be resolved
+because the connection may get reestablished. A “not leader for partition” error can
+be resolved when a new leader is elected for the partition and the client metadata is
+refreshed. KafkaProducer can be configured to retry those errors automatically, so
+the application code will get retriable exceptions only when the number of retries was
+exhausted and the error was not resolved. Some errors will not be resolved by retry‐
+ing—for example, “Message size too large. ” In those cases, KafkaProducer will not
+attempt a retry and will return the exception immediately.
+Sending a Message Asynchronously
+Suppose the network round-trip time between our application and the Kafka cluster
+is 10 ms. If we wait for a reply after sending each message, sending 100 messages will
+take around 1 second. On the other hand, if we just send all our messages and not
+wait for any replies, then sending 100 messages will barely take any time at all. In
+most cases, we really don’t need a reply—Kafka sends back the topic, partition, and
+offset of the record after it was written, which is usually not required by the sending
+app. On the other hand, we do need to know when we failed to send a message com‐
+pletely so we can throw an exception, log an error, or perhaps write the message to an
+“errors” file for later analysis.
+To send messages asynchronously and still handle error scenarios, the producer sup‐
+ports adding a callback when sending a record. Here is an example of how we use a
+callback:
+Sending a Message to Kafka | 53
+
+=== PAGE 83 ===
+private class DemoProducerCallback implements Callback { 
+    @Override
+    public void onCompletion(RecordMetadata recordMetadata, Exception e) {
+        if (e != null) {
+            e.printStackTrace(); 
+        }
+    }
+}
+ProducerRecord<String, String> record =
+    new ProducerRecord<>("CustomerCountry", "Biomedical Materials", "USA"); 
+producer.send(record, new DemoProducerCallback()); 
+To use callbacks, you need a class that implements the org.apache.kafka.
+clients.producer.Callback interface, which has a single function— on
+Completion().
+If Kafka returned an error, onCompletion() will have a nonnull exception. Here
+we “handle” it by printing, but production code will probably have more robust
+error handling functions.
+The records are the same as before.
+And we pass a Callback object along when sending the record.
+The callbacks execute in the producer’s main thread. This guaran‐
+tees that when we send two messages to the same partition one
+after another, their callbacks will be executed in the same order that
+we sent them. But it also means that the callback should be reason‐
+ably fast to avoid delaying the producer and preventing other mes‐
+sages from being sent. It is not recommended to perform a
+blocking operation within the callback. Instead, you should use
+another thread to perform any blocking operation concurrently.
+Configuring Producers
+So far we’ve seen very few configuration parameters for the producers—just the
+mandatory bootstrap.servers URI and serializers.
+The producer has a large number of configuration parameters that are documented
+in Apache Kafka documentation , and many have reasonable defaults, so there is no
+reason to tinker with every single parameter. However, some of the parameters have a
+significant impact on memory use, performance, and reliability of the producers. We
+will review those here.
+54 | Chapter 3: Kafka Producers: Writing Messages to Kafka
+
+=== PAGE 84 ===
+client.id
+client.id is a logical identifier for the client and the application it is used in.  This
+can be any string and will be used by the brokers to identify messages sent from the
+client. It is used in logging and metrics and for quotas. Choosing a good client name
+will make troubleshooting much easier—it is the difference between “We are seeing a
+high rate of authentication failures from IP 104.27.155.134” and “Looks like the
+Order Validation service is failing to authenticate—can you ask Laura to take a look?”
+acks
+The acks parameter controls how many partition replicas must receive the record
+before the producer can consider the write successful. By default, Kafka will respond
+that the record was written successfully after the leader received the record (release
+3.0 of Apache Kafka is expected to change this default). This option has a significant
+impact on the durability of written messages, and depending on your use case, the
+default may not be the best choice. Chapter 7 discusses Kafka’s reliability guarantees
+in depth, but for now let’s review the three allowed values for the acks parameter:
+acks=0
+The producer will not wait for a reply from the broker before assuming the mes‐
+sage was sent successfully. This means that if something goes wrong and the
+broker does not receive the message, the producer will not know about it, and the
+message will be lost. However, because the producer is not waiting for any
+response from the server, it can send messages as fast as the network will support,
+so this setting can be used to achieve very high throughput.
+acks=1
+The producer will receive a success response from the broker the moment the
+leader replica receives the message. If the message can’t be written to the leader
+(e.g., if the leader crashed and a new leader was not elected yet), the producer will
+receive an error response and can retry sending the message, avoiding potential
+loss of data. The message can still get lost if the leader crashes and the latest mes‐
+sages were not yet replicated to the new leader.
+acks=all
+The producer will receive a success response from the broker once all in sync
+replicas receive the message. This is the safest mode since you can make sure
+more than one broker has the message and that the message will survive even in
+case of a crash (more information on this in Chapter 6). However, the latency we
+discussed in the acks=1 case will be even higher, since we will be waiting for
+more than just one broker to receive the message.
+Configuring Producers | 55
+
+=== PAGE 85 ===
+1 Image contributed to the Apache Kafka project by Sumant Tambe under the ASLv2 license terms.
+Y ou will see that with lower and less reliable acks configuration,
+the producer will be able to send records faster. This means that
+you trade off reliability for producer latency. However, end-to-end
+latency is measured from the time a record was produced until it is
+available for consumers to read and is identical for all three
+options. The reason is that, in order to maintain consistency, Kafka
+will not allow consumers to read records until they are written to
+all in sync replicas. Therefore, if you care about end-to-end latency,
+rather than just the producer latency, there is no trade-off to make:
+you will get the same end-to-end latency if you choose the most
+reliable option.
+Message Delivery Time
+The producer has multiple configuration parameters that interact to control one of
+the behaviors that are of most interest to developers: how long will it take until a call
+to send() will succeed or fail. This is the time we are willing to spend until Kafka
+responds successfully, or until we are willing to give up and admit defeat.
+The configurations and their behaviors were modified several times over the years.
+We will describe here the latest implementation, introduced in Apache Kafka 2.1.
+Since Apache Kafka 2.1, we divide the time spent sending a ProduceRecord into two
+time intervals that are handled separately:
+• Time until an async call to send() returns. During this interval, the thread that
+called send() will be blocked.
+• From the time an async call to send() returned successfully until the callback is
+triggered (with success or failure). This is the same as from the point a Produce
+Record was placed in a batch for sending until Kafka responds with success, non‐
+retriable failure, or we run out of time allocated for sending.
+If you use send() synchronously, the sending thread will block for
+both time intervals continuously, and you won’t be able to tell how
+much time was spent in each. We’ll discuss the common and rec‐
+ommended case, where send() is used asynchronously, with a
+callback.
+The flow of data within the producer and how the different configuration parameters
+affect each other can be summarized in Figure 3-2.1
+56 | Chapter 3: Kafka Producers: Writing Messages to Kafka
+
+=== PAGE 86 ===
+Figure 3-2. Sequence diagram of delivery time breakdown inside Kafka producer
+We’ll go through the different configuration parameters used to control the time
+spent waiting in these two intervals and how they interact.
+max.block.ms
+This parameter controls how long the producer may block when calling send() and
+when explicitly requesting metadata via partitionsFor(). Those methods may block
+when the producer’s send buffer is full or when metadata is not available. When
+max.block.ms is reached, a timeout exception is thrown.
+delivery.timeout.ms
+This configuration will limit the amount of time spent from the point a record is
+ready for sending (send() returned successfully and the record is placed in a batch)
+until either the broker responds or the client gives up, including time spent on retries.
+As you can see in Figure 3-2 , this time should be greater than linger.ms and
+request.timeout.ms. If you try to create a producer with an inconsistent timeout
+configuration, you will get an exception. Messages can be successfully sent much
+faster than delivery.timeout.ms, and typically will.
+If the producer exceeds delivery.timeout.ms while retrying, the callback will be
+called with the exception that corresponds to the error that the broker returned
+before retrying. If delivery.timeout.ms is exceeded while the record batch was still
+waiting to be sent, the callback will be called with a timeout exception.
+Configuring Producers | 57
+
+=== PAGE 87 ===
+Y ou can configure the delivery timeout to the maximum time you’ll
+want to wait for a message to be sent, typically a few minutes, and
+then leave the default number of retries (virtually infinite). With
+this configuration, the producer will keep retrying for as long as it
+has time to keep trying (or until it succeeds). This is a much more
+reasonable way to think about retries. Our normal process for tun‐

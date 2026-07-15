@@ -1,0 +1,200 @@
+there are 24 processors in the system, 100% would be a load aver‐
+age of 24.
+The Kafka broker uses a significant amount of processing for handling requests. For
+this reason, keeping track of the CPU utilization is important when monitoring
+Kafka. Memory is less important to track for the broker itself, as Kafka will normally
+be run with a relatively small JVM heap size. It will use a small amount of memory
+outside of the heap for compression functions, but most of the system memory will
+be left to be used for cache. All the same, you should keep track of memory utiliza‐
+tion to make sure other applications do not infringe on the broker. Y ou will also want
+to make sure that swap memory is not being used by monitoring the amount of total
+and free swap memory.
+Disk is by far the most important subsystem when it comes to Kafka. All messages are
+persisted to disk, so the performance of Kafka depends heavily on the performance of
+the disks. Monitoring usage of both disk space and inodes ( inodes are the file and
+directory metadata objects for Unix filesystems) is important, as you need to assure
+that you are not running out of space. This is especially true for the partitions where
+368 | Chapter 13: Monitoring Kafka
+
+=== PAGE 398 ===
+Kafka data is being stored. It is also necessary to monitor the disk I/O statistics, as
+this will tell us that the disk is being used efficiently. For at least the disks where Kafka
+data is stored, monitor the reads and writes per second, the average read and write
+queue sizes, the average wait time, and the utilization percentage of the disk.
+Finally, monitor the network utilization on the brokers. This is simply the amount of
+inbound and outbound network traffic, normally reported in bits per second. Keep in
+mind that every bit inbound to the Kafka broker will be a number of bits outbound
+equal to the replication factor of the topics, not including consumers. Depending on
+the number of consumers, outbound network traffic could easily be an order of mag‐
+nitude larger than inbound traffic. Keep this in mind when setting thresholds for
+alerts.
+Logging
+No discussion of monitoring is complete without a word about logging. Like many
+applications, the Kafka broker will fill disks with log messages in minutes if you let it.
+In order to get useful information from logging, it is important to enable the right
+loggers at the right levels. By simply logging all messages at the INFO level, you will
+capture a significant amount of important information about the state of the broker.
+It is useful to separate a couple of loggers from this, however, in order to provide a
+cleaner set of log files.
+There are two loggers writing to separate files on disk. The first is kafka.controller,
+still at the INFO level. This logger is used to provide messages specifically regarding
+the cluster controller. At any time, only one broker will be the controller, and there‐
+fore only one broker will be writing to this logger. The information includes topic
+creation and modification, broker status changes, and cluster activities such as prefer‐
+red replica elections and partition moves. The other logger to separate is
+kafka.server.ClientQuotaManager, also at the INFO level. This logger is used to
+show messages related to produce and consume quota activities. While this is useful
+information, it is better to not have it in the main broker log file.
+It is also helpful to log information regarding the status of the log compaction
+threads. There is no single metric to show the health of these threads, and it is possi‐
+ble for failure in compaction of a single partition to halt the log compaction threads
+entirely, and silently. Enabling the kafka.log.LogCleaner, kafka.log.Cleaner, and
+kafka.log.LogCleanerManager loggers at the DEBUG level will output information
+about the status of these threads. This will include information about each partition
+being compacted, including the size and number of messages in each. Under normal
+operations, this is not a lot of logging, which means that it can be enabled by default
+without overwhelming you.
+Kafka Broker Metrics | 369
+
+=== PAGE 399 ===
+There is also some logging that may be useful to turn on when debugging issues with
+Kafka. One such logger is kafka.request.logger, turned on at either the DEBUG or
+TRACE levels. This logs information about every request sent to the broker. At the
+DEBUG level, the log includes connection end points, request timings, and summary
+information. At the TRACE level, it will also include topic and partition information—
+nearly all request information short of the message payload itself. At either level, this
+logger generates a significant amount of data, and it is not recommended to enable it
+unless necessary for debugging.
+Client Monitoring
+All applications need monitoring. Those that instantiate a Kafka client, either a pro‐
+ducer or consumer, have metrics specific to the client that should be captured. This
+section covers the official Java client libraries, though other implementations should
+have their own measurements available.
+Producer Metrics
+The Kafka producer client has greatly compacted the metrics available by making
+them available as attributes on a small number of JMX MBeans. In contrast, the pre‐
+vious version of the producer client (which is no longer supported) used a larger
+number of MBeans but had more detail in many of the metrics (providing a greater
+number of percentile measurements and different moving averages). As a result, the
+overall number of metrics provided covers a wider surface area, but it can be more
+difficult to track outliers.
+All of the producer metrics have the client ID of the producer client in the bean
+names. In the examples provided, this has been replaced with CLIENTID. Where a
+bean name contains a broker ID, this has been replaced with BROKERID. Topic names
+have been replaced with TOPICNAME. See Table 13-19 for an example.
+Table 13-19. Kafka producer metric MBeans
+Name JMX MBean
+Overall producer kafka.producer:type=producer-metrics,client-id=CLIENTID
+Per-broker kafka.producer:type=producer-node-metrics,client-id=CLIENTID,node-
+id=node-BROKERID
+Per-topic kafka.producer:type=producer-topic-metrics,client-id=CLIEN
+TID,topic=TOPICNAME
+Each of the metric beans in Table 13-19 has multiple attributes available to describe
+the state of the producer. The particular attributes that are of the most use are
+370 | Chapter 13: Monitoring Kafka
+
+=== PAGE 400 ===
+described in the next section. Before proceeding, be sure you understand the seman‐
+tics of how the producer works, as described in Chapter 3.
+Overall producer metrics
+The overall producer metrics bean provides attributes describing everything from the
+sizes of the message batches to the memory buffer utilization. While all of these
+measurements have their place in debugging, there are only a handful needed on a
+regular basis, and only a couple of those that should be monitored and have alerts.
+Note that while we will discuss several metrics that are averages (ending in -avg),
+there are also maximum values for each metric (ending in -max) that have limited
+usefulness.
+The record-error-rate is one attribute that you will definitely want to set an alert
+for. This metric should always be zero, and if it is anything greater than that, the pro‐
+ducer is dropping messages it is trying to send to the Kafka brokers. The producer
+has a configured number of retries and a backoff between those, and once that has
+been exhausted, the messages (called records here) will be dropped. There is also a
+record-retry-rate attribute that can be tracked, but it is less critical than the error
+rate because retries are normal.
+The other metric to alert on is the request-latency-avg. This is the average amount
+of time a produce request sent to the brokers takes. Y ou should be able to establish a
+baseline value for what this number should be in normal operations, and set an alert
+threshold above that. An increase in the request latency means that produce requests
+are getting slower. This could be due to networking issues, or it could indicate prob‐
+lems on the brokers. Either way, it’s a performance issue that will cause back pressure
+and other problems in your producing application.
+In addition to these critical metrics, it is always good to know how much message
+traffic your producer is sending. Three attributes will provide three different views of
+this. The outgoing-byte-rate describes the messages in absolute size in bytes per
+second. The record-send-rate describes the traffic in terms of the number of mes‐
+sages produced per second. Finally, the request-rate provides the number of pro‐
+duce requests sent to the brokers per second. A single request contains one or more
+batches. A single batch contains one or more messages. And, of course, each message
+is made up of some number of bytes. These metrics are all useful to have on an appli‐
+cation dashboard.
+There are also metrics that describe the size of records, requests, and batches. The
+request-size-avg metric provides the average size of the produce requests being
+sent to the brokers in bytes. The batch-size-avg provides the average size of a single
+message batch (which, by definition, is comprised of messages for a single topic parti‐
+tion) in bytes. The record-size-avg shows the average size of a single record in
+Client Monitoring | 371
+
+=== PAGE 401 ===
+bytes. For a single-topic producer, this provides useful information about the mes‐
+sages being produced. For multiple-topic producers, such as MirrorMaker, it is less
+informative. Besides these three metrics, there is a records-per-request-avg metric
+that describes the average number of messages that are in a single produce request.
+The last overall producer metric attribute that is recommended is record-queue-
+time-avg. This measurement is the average amount of time, in milliseconds, that a
+single message waits in the producer, after the application sends it, before it is actually
+produced to Kafka. After an application calls the producer client to send a message
+(by calling the send method), the producer waits until one of two things happens:
+• It has enough messages to fill a batch based on the batch.size configuration.
+• It has been long enough since the last batch was sent based on the linger.ms
+configuration.
+Either of these two will cause the producer client to close the current batch it is build‐
+ing and send it to the brokers. The easiest way to understand it is that for busy topics,
+the first condition will apply, whereas for slow topics, the second will apply. The
+record-queue-time-avg measurement will indicate how long messages take to be
+produced, and therefore is helpful when tuning these two configurations to meet the
+latency requirements for your application.
+Per-broker and per-topic metrics
+In addition to the overall producer metrics, there are metric beans that provide a
+limited set of attributes for the connection to each Kafka broker, as well as for each
+topic that is being produced. These measurements are useful for debugging problems
+in some cases, but they are not metrics that you are going to want to review on an
+ongoing basis. All of the attributes on these beans are the same as the attributes for
+the overall producer beans described previously and have the same meaning as
+described previously (except that they apply either to a specific broker or a specific
+topic).
+The most useful metric provided by the per-broker producer metrics is the request-
+latency-avg measurement . This is because this metric will be mostly stable (given
+stable batching of messages) and can still show a problem with connections to a spe‐
+cific broker. The other attributes, such as outgoing-byte-rate and request-
+latency-avg, tend to vary depending on what partitions each broker is leading. This
+means that what these measurements “should” be at any point in time can quickly
+change, depending on the state of the Kafka cluster.
+The topic metrics are a little more interesting than the per-broker metrics, but they
+will only be useful for producers that are working with more than one topic. They
+will also only be usable on a regular basis if the producer is not working with a lot of
+372 | Chapter 13: Monitoring Kafka
+
+=== PAGE 402 ===
+topics. For example, a MirrorMaker could be producing hundreds, or thousands, of
+topics. It is difficult to review all of those metrics, and nearly impossible to set reason‐
+able alert thresholds on them. As with the per-broker metrics, the per-topic measure‐
+ments are best used when investigating a specific problem. The record-send-rate
+and record-error-rate attributes, for example, can be used to isolate dropped mes‐
+sages to a specific topic (or validated to be across all topics). In addition, there is a
+byte-rate metric that provides the overall messages rate in bytes per second for the
+topic.
+Consumer Metrics
+Similar to the producer client, the consumer in Kafka consolidates many of the met‐
+rics into attributes on just a few metric beans. These metrics have also eliminated the
+percentiles for latencies and the moving averages for rates, which were presenting in
+the deprecated Scala consumer, similar to the producer client. In the consumer,
+because the logic around consuming messages is a little more complex than just firing
+messages into the Kafka brokers, there are a few more metrics to deal with as well. See
+Table 13-20.
+Table 13-20. Kafka consumer metric MBeans
+Name JMX MBean
+Overall consumer kafka.consumer:type=consumer-metrics,client-id=CLIENTID
+Fetch manager kafka.consumer:type=consumer-fetch-manager-metrics,client-id=CLIENTID
+Per-topic kafka.consumer:type=consumer-fetch-manager-metrics,client-id=CLIENT
+ID,topic=TOPICNAME
+Per-broker kafka.consumer:type=consumer-node-metrics,client-id=CLIENTID,node-

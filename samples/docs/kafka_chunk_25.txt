@@ -1,0 +1,200 @@
+Now let’s try something a bit more ambitious: check if a topic exists, and create it if it
+doesn’t. One way to check if a specific topic exists is to get a list of all topics and check
+if the topic you need is in the list. On a large cluster, this can be inefficient. In addi‐
+tion, sometimes you want to check for more than just whether the topic exists—you
+want to make sure the topic has the right number of partitions and replicas. For
+example, Kafka Connect and Confluent Schema Registry use a Kafka topic to store
+configuration. When they start up, they check if the configuration topic exists, that it
+has only one partition to guarantee that configuration changes will arrive in strict
+order, that it has three replicas to guarantee availability, and that the topic is compac‐
+ted so the old configuration will be retained indefinitely:
+DescribeTopicsResult demoTopic = admin.describeTopics(TOPIC_LIST); 
+try {
+    topicDescription = demoTopic.values().get(TOPIC_NAME).get(); 
+    System.out.println("Description of demo topic:" + topicDescription);
+    if (topicDescription.partitions().size() != NUM_PARTITIONS) { 
+      System.out.println("Topic has wrong number of partitions. Exiting.");
+      System.exit(-1);
+    }
+} catch (ExecutionException e) { 
+    // exit early for almost all exceptions
+    if (! (e.getCause() instanceof UnknownTopicOrPartitionException)) {
+        e.printStackTrace();
+        throw e;
+    }
+    // if we are here, topic doesn't exist
+    System.out.println("Topic " + TOPIC_NAME +
+        " does not exist. Going to create it now");
+    // Note that number of partitions and replicas is optional. If they are
+118 | Chapter 5: Managing Apache Kafka Programmatically
+
+=== PAGE 148 ===
+    // not specified, the defaults configured on the Kafka brokers will be used
+    CreateTopicsResult newTopic = admin.createTopics(Collections.singletonList(
+            new NewTopic(TOPIC_NAME, NUM_PARTITIONS, REP_FACTOR))); 
+    // Check that the topic was created correctly:
+    if (newTopic.numPartitions(TOPIC_NAME).get() != NUM_PARTITIONS) { 
+        System.out.println("Topic has wrong number of partitions.");
+        System.exit(-1);
+    }
+}
+To check that the topic exists with the correct configuration, we call describe
+Topics() with a list of topic names we want to validate. This returns Describe
+TopicResult object, which wraps a map of topic names to Future descriptions.
+We’ve already seen that if we wait for the Future to complete, using get() we can
+get the result we wanted, in this case, a TopicDescription. But there is also a
+possibility that the server can’t complete the request correctly—if the topic does
+not exist, the server can’t respond with its description. In this case, the server will
+send back an error, and the Future will complete by throwing an Execution
+Exception. The actual error sent by the server will be the cause of the exception.
+Since we want to handle the case where the topic doesn’t exist, we handle these
+exceptions.
+If the topic does exist, the Future completes by returning a TopicDescription,
+which contains a list of all the partitions of the topic, and for each partition in
+which a broker is the leader, a list of replicas and a list of in-sync replicas. Note
+that this does not include the configuration of the topic. We’ll discuss configura‐
+tion later in this chapter.
+Note that all AdminClient result objects throw ExecutionException when Kafka
+responds with an error. This is because AdminClient results are wrapped Future
+objects, and those wrap exceptions. Y ou always need to examine the cause of
+ExecutionException to get the error that Kafka returned.
+If the topic does not exist, we create a new topic. When creating a topic, you can
+specify just the name and use default values for all the details. Y ou can also spec‐
+ify the number of partitions, number of replicas, and the configuration.
+Finally, you want to wait for topic creation to return, and perhaps validate the
+result. In this example, we are checking the number of partitions. Since we speci‐
+fied the number of partitions when we created the topic, we are fairly certain it is
+correct. Checking the result is more common if you relied on broker defaults
+when creating the topic. Note that since we are again calling get() to check the
+Essential Topic Management | 119
+
+=== PAGE 149 ===
+results of CreateTopic, this method could throw an exception. TopicExists
+Exception is common in this scenario, and you’ll want to handle it (perhaps by
+describing the topic to check for the correct configuration).
+Now that we have a topic, let’s delete it:
+admin.deleteTopics(TOPIC_LIST).all().get();
+// Check that it is gone. Note that due to the async nature of deletes,
+// it is possible that at this point the topic still exists
+try {
+    topicDescription = demoTopic.values().get(TOPIC_NAME).get();
+    System.out.println("Topic " + TOPIC_NAME + " is still around");
+} catch (ExecutionException e) {
+    System.out.println("Topic " + TOPIC_NAME + " is gone");
+}
+At this point the code should be quite familiar. We call the method deleteTopics
+with a list of topic names to delete, and we use get() to wait for this to complete.
+Although the code is simple, please remember that in Kafka, dele‐
+tion of topics is final—there is no recycle bin or trash can to help
+you rescue the deleted topic, and no checks to validate that the
+topic is empty and that you really meant to delete it. Deleting the
+wrong topic could mean unrecoverable loss of data, so handle this
+method with extra care.
+All the examples so far have used the blocking get() call on the Future returned by
+the different AdminClient methods. Most of the time, this is all you need—admin
+operations are rare, and waiting until the operation succeeds or times out is usually
+acceptable. There is one exception: if you are writing to a server that is expected to
+process a large number of admin requests. In this case, you don’t want to block the
+server threads while waiting for Kafka to respond. Y ou want to continue accepting
+requests from your users and sending them to Kafka, and when Kafka responds, send
+the response to the client. In these scenarios, the versatility of KafkaFuture becomes
+quite useful. Here’s a simple example.
+vertx.createHttpServer().requestHandler(request -> { 
+    String topic = request.getParam("topic"); 
+    String timeout = request.getParam("timeout");
+    int timeoutMs = NumberUtils.toInt(timeout, 1000);
+    DescribeTopicsResult demoTopic = admin.describeTopics( 
+            Collections.singletonList(topic),
+            new DescribeTopicsOptions().timeoutMs(timeoutMs));
+    demoTopic.values().get(topic).whenComplete( 
+            new KafkaFuture.BiConsumer<TopicDescription, Throwable>() {
+120 | Chapter 5: Managing Apache Kafka Programmatically
+
+=== PAGE 150 ===
+                @Override
+                public void accept(final TopicDescription topicDescription,
+                                   final Throwable throwable) {
+                    if (throwable != null) {
+                      request.response().end("Error trying to describe topic "
+                              + topic + " due to " + throwable.getMessage()); 
+                    } else {
+                        request.response().end(topicDescription.toString()); 
+                    }
+                }
+            });
+}).listen(8080);
+We are using Vert.x to create a simple HTTP server. Whenever this server
+receives a request, it calls the requestHandler that we are defining here.
+The request includes a topic name as a parameter, and we’ll respond with a
+description of this topic.
+We call AdminClient.describeTopics as usual and get a wrapped Future in
+response.
+Instead of using the blocking get() call, we construct a function that will be
+called when the Future completes.
+If the Future completes with an exception, we send the error to the HTTP client.
+If the Future completes successfully, we respond to the client with the topic
+description.
+The key here is that we are not waiting for a response from Kafka. DescribeTopic
+Result will send the response to the HTTP client when a response arrives from
+Kafka. Meanwhile, the HTTP server can continue processing other requests. Y ou can
+check this behavior by using SIGSTOP to pause Kafka (don’t try this in production!)
+and send two HTTP requests to Vert.x: one with a long timeout value and one with a
+short value. Even though you sent the second request after the first, it will respond
+earlier thanks to the lower timeout value, and not block behind the first request.
+Configuration Management
+Configuration management is done by describing and updating collections of Config
+Resource. Config resources can be brokers, broker loggers, and topics. Checking and
+modifying broker and broker logging configuration is typically done using tools like
+kafka-config.sh or other Kafka management tools, but checking and updating topic
+configuration from the applications that use them is quite common.
+Configuration Management | 121
+
+=== PAGE 151 ===
+For example, many applications rely on compacted topics for correct operation. It
+makes sense that periodically (more frequently than the default retention period, just
+to be safe), those applications will check that the topic is indeed compacted and take
+action to correct the topic configuration if it is not.
+Here’s an example of how this is done:
+ConfigResource configResource =
+        new ConfigResource(ConfigResource.Type.TOPIC, TOPIC_NAME); 
+DescribeConfigsResult configsResult =
+        admin.describeConfigs(Collections.singleton(configResource));
+Config configs = configsResult.all().get().get(configResource);
+// print nondefault configs
+configs.entries().stream().filter(
+        entry -> !entry.isDefault()).forEach(System.out::println); 
+// Check if topic is compacted
+ConfigEntry compaction = new ConfigEntry(TopicConfig.CLEANUP_POLICY_CONFIG,
+        TopicConfig.CLEANUP_POLICY_COMPACT);
+if (!configs.entries().contains(compaction)) {
+    // if topic is not compacted, compact it
+    Collection<AlterConfigOp> configOp = new ArrayList<AlterConfigOp>();
+    configOp.add(new AlterConfigOp(compaction, AlterConfigOp.OpType.SET)); 
+    Map<ConfigResource, Collection<AlterConfigOp>> alterConf = new HashMap<>();
+    alterConf.put(configResource, configOp);
+    admin.incrementalAlterConfigs(alterConf).all().get();
+} else {
+    System.out.println("Topic " + TOPIC_NAME + " is compacted topic");
+}
+As mentioned above, there are several types of ConfigResource; here we are
+checking the configuration for a specific topic. Y ou can specify multiple different
+resources from different types in the same request.
+The result of describeConfigs is a map from each ConfigResource to a collec‐
+tion of configurations. Each configuration entry has an isDefault() method that
+lets us know which configs were modified. A topic configuration is considered
+nondefault if a user configured the topic to have a nondefault value, or if a
+broker-level configuration was modified and the topic that was created inherited
+this nondefault value from the broker.
+To modify a configuration, specify a map of the ConfigResource you want to
+modify and a collection of operations. Each configuration modifying operation
+consists of a configuration entry (the name and value of the configuration; in this
+case, cleanup.policy is the configuration name and compacted is the value) and
+the operation type. Four types of operations modify configuration in Kafka: SET,
+122 | Chapter 5: Managing Apache Kafka Programmatically
+
+=== PAGE 152 ===
+which sets the configuration value; DELETE, which removes the value and resets to
+the default; APPEND; and SUBSTRACT. The last two apply only to configurations
+with a List type and allow adding and removing values from the list without
+having to send the entire list to Kafka every time.
+Describing the configuration can be surprisingly handy in an emergency. We remem‐

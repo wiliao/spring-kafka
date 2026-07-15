@@ -1,0 +1,200 @@
+50thPercentile, 75thPercentile, 95thPercentile, 98thPercentile,
+99thPercentile, 999thPercentile
+What Is a Percentile?
+Percentiles are a common way of looking at timing measurement.
+A 99th percentile measurement tells us that 99% of all values in the
+sample group (request timings, in this case) are less than the value
+of the metric. This means that 1% of the values are greater than the
+value specified. A common pattern is to view the average value and
+the 99% or 99.9% value. In this way, you can understand how the
+average request performs and what the outliers are.
+Out of all of these metrics and attributes for requests, which are the important ones to
+monitor? At a minimum, you should collect at least the average and one of the higher
+percentiles (either 99% or 99.9%) for the total time metric, as well as the requests per
+second metric, for every request type. This gives a view into the overall performance
+of requests to the Kafka broker. If you can, you should also collect those measure‐
+ments for the other six timing metrics for each request type, as this will allow you to
+narrow down any performance problems to a specific phase of request processing.
+For setting alert thresholds, the timing metrics can be difficult.  The timing for a
+Fetch request, for example, can vary wildly depending on many factors, including
+settings on the client for how long it will wait for messages, how busy the particular
+topic being fetched is, and the speed of the network connection between the client
+Kafka Broker Metrics | 363
+
+=== PAGE 393 ===
+and the broker. It can be very useful, however, to develop a baseline value for the
+99.9th percentile measurement for at least the total time, especially for Produce
+requests, and alert on this. Much like the under-replicated partitions metric, a sharp
+increase in the 99.9th percentile for Produce requests can alert you to a wide range of
+performance problems.
+Topic and Partition Metrics
+In addition to the many metrics available on the broker that describe the operation of
+the Kafka broker in general, there are topic- and partition-specific metrics. In larger
+clusters these can be numerous, and it may not be possible to collect all of them into a
+metrics system as a matter of normal operations. However, they are quite useful for
+debugging specific issues with a client. For example, the topic metrics can be used to
+identify a specific topic that is causing a large increase in traffic to the cluster. It also
+may be important to provide these metrics so that users of Kafka (the producer and
+consumer clients) are able to access them. Regardless of whether you are able to col‐
+lect these metrics regularly, you should be aware of what is useful.
+For all the examples in Table 13-16, we will be using the example topic name TOPIC
+NAME, as well as partition 0. When accessing the metrics described, make sure to sub‐
+stitute the topic name and partition number that are appropriate for your cluster.
+Per-topic metrics
+For all the per-topic metrics, the measurements are very similar to the broker metrics
+described previously. In fact, the only difference is the provided topic name, and that
+the metrics will be specific to the named topic. Given the sheer number of metrics
+available, depending on the number of topics present in your cluster, these will
+almost certainly be metrics that you will not want to set up monitoring and alerts for.
+They are useful to provide to clients, however, so that they can evaluate and debug
+their own usage of Kafka.
+Table 13-16. Metrics for each topic
+Name JMX MBean
+Bytes in rate kafka.server:type=BrokerTopicMetrics,name=BytesInPerSec,topic=TOPIC
+NAME
+Bytes out rate kafka.server:type=BrokerTopicMetrics,name=BytesOutPerSec,topic=TOP
+ICNAME
+Failed fetch rate kafka.server:type=BrokerTopicMetrics,name=FailedFetchRequestsPer
+Sec,topic=TOPICNAME
+Failed produce rate kafka.server:type=BrokerTopicMetrics,name=FailedProduceRequestsPer
+Sec,topic=TOPICNAME
+364 | Chapter 13: Monitoring Kafka
+
+=== PAGE 394 ===
+Name JMX MBean
+Messages in rate kafka.server:type=BrokerTopicMetrics,name=MessagesInPer
+Sec,topic=TOPICNAME
+Fetch request rate kafka.server:type=BrokerTopicMetrics,name=TotalFetchRequestsPer
+Sec,topic=TOPICNAME
+Produce request rate kafka.server:type=BrokerTopicMetrics,name=TotalProduceRequestsPer
+Sec,topic=TOPICNAME
+Per-partition metrics
+The per-partition metrics tend to be less useful on an ongoing basis than the per-
+topic metrics. Additionally, they are quite numerous as hundreds of topics can easily
+be thousands of partitions. Nevertheless, they can be useful in some limited situa‐
+tions. In particular, the partition-size metric indicates the amount of data (in bytes)
+that is currently being retained on disk for the partition ( Table 13-17). Combined,
+these will indicate the amount of data retained for a single topic, which can be useful
+in allocating costs for Kafka to individual clients. A discrepancy between the size of
+two partitions for the same topic can indicate a problem where the messages are not
+evenly distributed across the key that is being used when producing. The log-segment
+count metric shows the number of log-segment files on disk for the partition. This
+may be useful along with the partition size for resource tracking.
+Table 13-17. Metrics for each partition
+Name JMX MBean
+Partition size kafka.log:type=Log,name=Size,topic=TOPICNAME,partition=0
+Log segment count kafka.log:type=Log,name=NumLogSegments,topic=TOPICNAME,partition=0
+Log end offset kafka.log:type=Log,name=LogEndOffset,topic=TOPICNAME,partition=0
+Log start offset kafka.log:type=Log,name=LogStartOffset,topic=TOPICNAME,partition=0
+The log end offset and log start offset metrics are the highest and lowest offsets for
+messages in that partition, respectively. It should be noted, however, that the differ‐
+ence between these two numbers does not necessarily indicate the number of mes‐
+sages in the partition, as log compaction can result in “missing” offsets that have been
+removed from the partition due to newer messages with the same key. In some envi‐
+ronments, it could be useful to track these offsets for a partition. One such use case is
+to provide a more granular mapping of timestamp to offset, allowing for consumer
+clients to easily roll back offsets to a specific time (though this is less important with
+time-based index searching, introduced in Kafka 0.10.1).
+Kafka Broker Metrics | 365
+
+=== PAGE 395 ===
+Under-Replicated Partition Metrics
+There is a per-partition metric provided to indicate whether or not
+the partition is under-replicated. In general, this is not very useful
+in day-to-day operations, as there are too many metrics to gather
+and watch. It is much easier to monitor the broker-wide under-
+replicated partition count and then use the command-line tools
+(described in Chapter 12) to determine the specific partitions that
+are under-replicated.
+JVM Monitoring
+In addition to the metrics provided by the Kafka broker, you should be monitoring a 
+standard suite of measurements for all of your servers, as well as the Java Virtual
+Machine (JVM) itself. These will be useful to alert you to a situation, such as increas‐
+ing garbage collection activity, that will degrade the performance of the broker. They
+will also provide insight into why you see changes in metrics downstream in the
+broker.
+Garbage collection
+For the JVM, the critical thing to monitor is the status of garbage collection (GC).
+The particular beans that you must monitor for this information will vary depending
+on the particular Java Runtime Environment (JRE) that you are using, as well as the
+specific GC settings in use. For an Oracle Java 1.8 JRE running with G1 garbage col‐
+lection, the beans to use are shown in Table 13-18.
+Table 13-18. G1 garbage collection metrics
+Name JMX MBean
+Full GC cycles java.lang:type=GarbageCollector,name=G1 Old Generation
+Young GC cycles java.lang:type=GarbageCollector,name=G1 Young Generation
+Note that in the semantics of GC, “Old” and “Full” are the same thing. For each of
+these metrics, the two attributes to watch are CollectionCount and CollectionTime.
+The CollectionCount is the number of GC cycles of that type (Full or Y oung) since
+the JVM was started. The CollectionTime is the amount of time, in milliseconds,
+spent in that type of GC cycle since the JVM was started. As these measurements are
+counters, they can be used by a metrics system to tell you an absolute number of GC
+cycles and time spent in GC per unit of time. They can also be used to provide an
+average amount of time per GC cycle, though this is less useful in normal operations.
+Each of these metrics also has a LastGcInfo attribute. This is a composite value,
+made up of five fields, that gives you information on the last GC cycle for the type of
+GC described by the bean. The important value to look at is the duration value, as
+366 | Chapter 13: Monitoring Kafka
+
+=== PAGE 396 ===
+this tells you how long, in milliseconds, the last GC cycle took. The other values in
+the composite (GcThreadCount, id, startTime, and endTime) are informational and
+not very useful. It’s important to note that you will not be able to see the timing of
+every GC cycle using this attribute, as young GC cycles in particular can happen
+frequently.
+Java OS monitoring
+The JVM can provide you with some information on the OS through the
+java.lang:type=OperatingSystem bean. However, this information is limited and
+does not represent everything you need to know about the system running your
+broker. The two attributes that can be collected here that are of use, which are diffi‐
+cult to collect in the OS, are the MaxFileDescriptorCount and OpenFileDescriptor
+Count attributes. MaxFileDescriptorCount will tell you the maximum number of file
+descriptors (FDs) that the JVM is allowed to have open. The OpenFileDescriptor
+Count attribute tells you the number of FDs that are currently open. There will be
+FDs open for every log segment and network connection, and they can add up
+quickly. A problem closing network connections properly could cause the broker to
+rapidly exhaust the number allowed.
+OS Monitoring
+The JVM cannot provide us with all the information that we need to know about the
+system it is running on. For this reason, we must not only collect metrics from the
+broker but also from the OS itself. Most monitoring systems will provide agents that
+will collect more OS information than you could possibly be interested in. The main
+areas that are necessary to watch are CPU usage, memory usage, disk usage, disk I/O,
+and network usage.
+For CPU utilization, you will want to look at the system load average at the very least.
+This provides a single number that will indicate the relative utilization of the process‐
+ors. In addition, it may also be useful to capture the percent usage of the CPU, broken
+down by type. Depending on the method of collection and your particular OS, you
+may have some or all of the following CPU percentage breakdowns (provided with
+the abbreviation used):
+us
+The time spent in user space
+sy
+The time spent in kernel space
+ni
+The time spent on low-priority processes
+Kafka Broker Metrics | 367
+
+=== PAGE 397 ===
+id
+The time spent idle
+wa
+The time spent in wait (on disk)
+hi
+The time spent handling hardware interrupts
+si
+The time spent handling software interrupts
+st
+The time waiting for the hypervisor
+What Is System Load?
+While many know that system load is a measure of CPU usage on a
+system, most people misunderstand how it is measured. The load
+average is a count of the number of processes that are runnable and
+are waiting for a processor to execute on. Linux also includes
+threads that are in an uninterruptable sleep state, such as waiting
+for the disk. The load is presented as three numbers, which is the
+count averaged over the last minute, 5 minutes, and 15 minutes. In
+a single CPU system, a value of 1 would mean the system is 100%
+loaded, with a thread always waiting to execute. This means that on
+a multiple CPU system, the load average number that indicates
+100% is equal to the number of CPUs in the system. For example, if

@@ -1,0 +1,200 @@
+ship of partitions. It will not be called with an empty
+collection.
+• onPartitionsLost() will be invoked in exceptional rebalanc‐
+ing conditions, and the partitions in the collection will already
+have new owners by the time the method is invoked.
+If you implemented all three methods, you are guaranteed that dur‐
+ing a normal rebalance, onPartitionsAssigned() will be called by
+the new owner of the partitions that are reassigned only after the
+previous owner completed onPartitionsRevoked() and gave up
+its ownership.
+This example will show how to use onPartitionsRevoked() to commit offsets before
+losing ownership of a partition:
+private Map<TopicPartition, OffsetAndMetadata> currentOffsets =
+    new HashMap<>();
+Duration timeout = Duration.ofMillis(100);
+private class HandleRebalance implements ConsumerRebalanceListener { 
+    public void onPartitionsAssigned(Collection<TopicPartition>
+        partitions) { 
+    }
+    public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
+        System.out.println("Lost partitions in rebalance. " +
+            "Committing current offsets:" + currentOffsets);
+        consumer.commitSync(currentOffsets); 
+102 | Chapter 4: Kafka Consumers: Reading Data from Kafka
+
+=== PAGE 132 ===
+    }
+}
+try {
+    consumer.subscribe(topics, new HandleRebalance()); 
+    while (true) {
+        ConsumerRecords<String, String> records = consumer.poll(timeout);
+        for (ConsumerRecord<String, String> record : records) {
+            System.out.printf("topic = %s, partition = %s, offset = %d,
+                 customer = %s, country = %s\n",
+                 record.topic(), record.partition(), record.offset(),
+                 record.key(), record.value());
+             currentOffsets.put(
+                 new TopicPartition(record.topic(), record.partition()),
+                 new OffsetAndMetadata(record.offset()+1, null));
+        }
+        consumer.commitAsync(currentOffsets, null);
+    }
+} catch (WakeupException e) {
+    // ignore, we're closing
+} catch (Exception e) {
+    log.error("Unexpected error", e);
+} finally {
+    try {
+        consumer.commitSync(currentOffsets);
+    } finally {
+        consumer.close();
+        System.out.println("Closed consumer and we are done");
+    }
+}
+We start by implementing a ConsumerRebalanceListener.
+In this example we don’t need to do anything when we get a new partition; we’ll
+just start consuming messages.
+However, when we are about to lose a partition due to rebalancing, we need to
+commit offsets. We are committing offsets for all partitions, not just the parti‐
+tions we are about to lose—because the offsets are for events that were already
+processed, there is no harm in that. And we are using commitSync() to make sure
+the offsets are committed before the rebalance proceeds.
+The most important part: pass the ConsumerRebalanceListener to the
+subscribe() method so it will get invoked by the consumer.
+Rebalance Listeners | 103
+
+=== PAGE 133 ===
+Consuming Records with Specific Offsets
+So far we’ve seen how to use poll() to start consuming messages from the last com‐
+mitted offset in each partition and to proceed in processing all messages in sequence.
+However, sometimes you want to start reading at a different offset. Kafka offers a
+variety of methods that cause the next poll() to start consuming in a different offset.
+If you want to start reading all messages from the beginning of the partition, or you
+want to skip all the way to the end of the partition and start consuming only new
+messages, there are APIs specifically for that: seekToBeginning(Collection<Topic
+Partition> tp) and seekToEnd(Collection<TopicPartition> tp).
+The Kafka API also lets you seek a specific offset.  This ability can be used in a variety
+of ways; for example, a time-sensitive application could skip ahead a few records
+when falling behind, or a consumer that writes data to a file could be reset back to a
+specific point in time in order to recover data if the file was lost.
+Here’s a quick example of how to set the current offset on all partitions to records that
+were produced at a specific point in time:
+Long oneHourEarlier = Instant.now().atZone(ZoneId.systemDefault())
+          .minusHours(1).toEpochSecond();
+Map<TopicPartition, Long> partitionTimestampMap = consumer.assignment()
+        .stream()
+        .collect(Collectors.toMap(tp -> tp, tp -> oneHourEarlier)); 
+Map<TopicPartition, OffsetAndTimestamp> offsetMap
+        = consumer.offsetsForTimes(partitionTimestampMap); 
+for(Map.Entry<TopicPartition,OffsetAndTimestamp> entry: offsetMap.entrySet()) {
+    consumer.seek(entry.getKey(), entry.getValue().offset()); 
+}
+We create a map from all the partitions assigned to this consumer (via
+consumer.assignment()) to the timestamp we wanted to revert the consumers
+to.
+Then we get the offsets that were current at these timestamps. This method sends
+a request to the broker where a timestamp index is used to return the relevant
+offsets.
+Finally, we reset the offset on each partition to the offset that was returned in the
+previous step.
+104 | Chapter 4: Kafka Consumers: Reading Data from Kafka
+
+=== PAGE 134 ===
+But How Do We Exit?
+Earlier in this chapter, when we discussed the poll loop, we told you not to worry
+about the fact that the consumer polls in an infinite loop, and that we would discuss
+how to exit the loop cleanly. So, let’s discuss how to exit cleanly.
+When you decide to shut down the consumer, and you want to exit immediately even
+though the consumer may be waiting on a long poll(), you will need another thread
+to call consumer.wakeup(). If you are running the consumer loop in the main thread,
+this can be done from ShutdownHook. Note that consumer.wakeup() is the only con‐
+sumer method that is safe to call from a different thread. Calling wakeup will cause
+poll() to exit with WakeupException, or if consumer.wakeup() was called while the
+thread was not waiting on poll, the exception will be thrown on the next iteration
+when poll() is called. The WakeupException doesn’t need to be handled, but before
+exiting the thread, you must call consumer.close(). Closing the consumer will com‐
+mit offsets if needed and will send the group coordinator a message that the con‐
+sumer is leaving the group. The consumer coordinator will trigger rebalancing
+immediately, and you won’t need to wait for the session to timeout before partitions
+from the consumer you are closing will be assigned to another consumer in the
+group.
+Here is what the exit code will look like if the consumer is running in the main appli‐
+cation thread. This example is a bit truncated, but you can view the full example on
+GitHub:
+Runtime.getRuntime().addShutdownHook(new Thread() {
+    public void run() {
+        System.out.println("Starting exit...");
+        consumer.wakeup(); 
+        try {
+            mainThread.join();
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+    }
+});
+...
+Duration timeout = Duration.ofMillis(10000); 
+try {
+    // looping until ctrl-c, the shutdown hook will cleanup on exit
+    while (true) {
+        ConsumerRecords<String, String> records =
+            movingAvg.consumer.poll(timeout);
+        System.out.println(System.currentTimeMillis() +
+            "--  waiting for data...");
+        for (ConsumerRecord<String, String> record : records) {
+But How Do We Exit? | 105
+
+=== PAGE 135 ===
+            System.out.printf("offset = %d, key = %s, value = %s\n",
+                record.offset(), record.key(), record.value());
+        }
+        for (TopicPartition tp: consumer.assignment())
+            System.out.println("Committing offset at position:" +
+                consumer.position(tp));
+        movingAvg.consumer.commitSync();
+    }
+} catch (WakeupException e) {
+    // ignore for shutdown 
+} finally {
+    consumer.close(); 
+    System.out.println("Closed consumer and we are done");
+}
+ShutdownHook runs in a separate thread, so the only safe action you can take is to
+call wakeup to break out of the poll loop.
+A particularly long poll timeout. If the poll loop is short enough and you don’t
+mind waiting a bit before exiting, you don’t need to call wakeup—just checking an
+atomic boolean in each iteration would be enough. Long poll timeouts are useful
+when consuming low-throughput topics; this way, the client uses less CPU for
+constantly looping while the broker has no new data to return.
+Another thread calling wakeup will cause poll to throw a WakeupException. Y ou’ll
+want to catch the exception to make sure your application doesn’t exit unexpect‐
+edly, but there is no need to do anything with it.
+Before exiting the consumer, make sure you close it cleanly.
+Deserializers
+As discussed in the previous chapter, Kafka producers require serializers to convert
+objects into byte arrays that are then sent to Kafka. Similarly, Kafka consumers
+require deserializers to convert byte arrays received from Kafka into Java objects. In
+previous examples, we just assumed that both the key and the value of each message
+are strings, and we used the default StringDeserializer in the consumer
+configuration.
+In Chapter 3 about the Kafka producer, we saw how to serialize custom types and
+how to use Avro and AvroSerializers to generate Avro objects from schema defini‐
+tions and then serialize them when producing messages to Kafka. We will now look at
+how to create custom deserializers for your own objects and how to use Avro and its
+deserializers.
+106 | Chapter 4: Kafka Consumers: Reading Data from Kafka
+
+=== PAGE 136 ===
+It should be obvious that the serializer used to produce events to Kafka must match
+the deserializer that will be used when consuming events. Serializing with IntSerial
+izer and then deserializing with StringDeserializer will not end well. This means
+that, as a developer, you need to keep track of which serializers were used to write
+into each topic and make sure each topic only contains data that the deserializers you
+use can interpret. This is one of the benefits of using Avro and the Schema Registry
+for serializing and deserializing—the AvroSerializer can make sure that all the data
+written to a specific topic is compatible with the schema of the topic, which means it
+can be deserialized with the matching deserializer and schema. Any errors in compat‐
+ibility—on the producer or the consumer side—will be caught easily with an appro‐
+priate error message, which means you will not need to try to debug byte arrays for

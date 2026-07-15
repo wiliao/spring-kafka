@@ -1,0 +1,200 @@
+always get new data in correct order without missing any messages.
+When a consumer stops, another consumer needs to know where to pick up the
+work—what was the last offset that the previous consumer processed before it stop‐
+ped? The “other” consumer can even be the original one after a restart. It doesn’t
+really matter—some consumer is going to pick up consuming from that partition,
+and it needs to know at which offset to start. This is why consumers need to “commit”
+their offsets. For each partition it is consuming, the consumer stores its current loca‐
+tion, so it or another consumer will know where to continue after a restart. The main
+way consumers can lose messages is when committing offsets for events they’ve read
+172 | Chapter 7: Reliable Data Delivery
+
+=== PAGE 202 ===
+but haven’t completely processed yet. This way, when another consumer picks up the
+work, it will skip those messages and they will never get processed. This is why paying
+careful attention to when and how offsets get committed is critical.
+Committed Messages Versus Committed Offsets
+This is different from a committed message, which, as discussed
+previously, is a message that was written to all in-sync replicas and
+is available to consumers. Committed offsets are offsets the con‐
+sumer sent to Kafka to acknowledge that it received and processed
+all the messages in a partition up to this specific offset.
+In Chapter 4, we discussed the Consumer API in detail and covered the many meth‐
+ods for committing offsets. Here we will cover some important considerations and
+choices, but refer back to Chapter 4 for details on using the APIs.
+Important Consumer Configuration Properties for Reliable Processing
+There are four consumer configuration properties that are important to understand
+in order to configure our consumer for a desired reliability behavior.
+The first is group.id, as explained in great detail in Chapter 4. The basic idea is that if
+two consumers have the same group ID and subscribe to the same topic, each will be
+assigned a subset of the partitions in the topic and will therefore only read a subset of
+the messages individually (but all the messages will be read by the group as a whole).
+If we need a consumer to see, on its own, every single message in the topics it is sub‐
+scribed to, it will need a unique group.id.
+The second relevant configuration is auto.offset.reset. This parameter controls
+what the consumer will do when no offsets were committed (e.g., when the consumer
+first starts) or when the consumer asks for offsets that don’t exist in the broker (Chap‐
+ter 4 explains how this can happen). There are only two options here. If we choose
+earliest, the consumer will start from the beginning of the partition whenever it
+doesn’t have a valid offset. This can lead to the consumer processing a lot of messages
+twice, but it guarantees to minimize data loss. If we choose latest, the consumer will
+start at the end of the partition. This minimizes duplicate processing by the consumer
+but almost certainly leads to some messages getting missed by the consumer.
+The third relevant configuration is enable.auto.commit. This is a big decision: are
+we going to let the consumer commit offsets for us based on schedule, or are we plan‐
+ning on committing offsets manually in our code? The main benefit of automatic off‐
+set commits is that it’s one less thing to worry about when using consumers in our
+application. When we do all the processing of consumed records within the con‐
+sumer poll loop, then the automatic offset commit guarantees we will never acciden‐
+tally commit an offset that we didn’t process. The main drawbacks of automatic offset
+Using Consumers in a Reliable System | 173
+
+=== PAGE 203 ===
+commits is that we have no control over the number of duplicate records the applica‐
+tion may process because it was stopped after processing some records but before the
+automated commit kicked in. When the application has more complex processing,
+such as passing records to another thread to process in the background, there is no
+choice but to use manual offset commit since the automatic commit may commit off‐
+sets for records the consumer has read but perhaps has not processed yet.
+The fourth relevant configuration, auto.commit.interval.ms, is tied to the third. If
+we choose to commit offsets automatically, this configuration lets us configure how
+frequently they will be committed. The default is every five seconds. In general, com‐
+mitting more frequently adds overhead but reduces the number of duplicates that can
+occur when a consumer stops.
+While not directly related to reliable data processing, it is difficult to consider a con‐
+sumer reliable if it frequently stops consuming in order to rebalance. Chapter 4
+includes advice on how to configure consumers to minimize unnecessary rebalancing
+and to minimize pauses while rebalancing.
+Explicitly Committing Offsets in Consumers
+If we decide we need more control and choose to commit offsets manually, we need
+to be concerned about correctness and performance implications.
+We will not go over the mechanics and APIs involved in committing offsets here,
+since they were covered in great depth in Chapter 4. Instead, we will review impor‐
+tant considerations when developing a consumer to handle data reliably. We’ll start
+with the simple and perhaps obvious points and move on to more complex patterns.
+Always commit offsets after messages were processed
+If we do all the processing within the poll loop and don’t maintain state between poll
+loops (e.g., for aggregation), this should be easy. We can use the auto-commit config‐
+uration, commit offset at the end of the poll loop, or commit offset inside the loop at
+a frequency that balances requirements for both overhead and lack of duplicate pro‐
+cessing. If there are additional threads or stateful processing involved, this becomes
+more complex, especially since the consumer object is not thread safe. In Chapter 4,
+we discussed how this can be done and provided references with additional examples.
+Commit frequency is a trade-off between performance and number of duplicates
+in the event of a crash
+Even in the simplest case where we do all the processing within the poll loop and
+don’t maintain state between poll loops, we can choose to commit multiple times
+within a loop or choose to only commit every several loops. Committing has signifi‐
+cant performance overhead. It is similar to produce with acks=all, but all offset
+commits of a single consumer group are produced to the same broker, which can
+174 | Chapter 7: Reliable Data Delivery
+
+=== PAGE 204 ===
+become overloaded. The commit frequency has to balance requirements for perfor‐
+mance and lack of duplicates. Committing after every message should only ever be
+done on very low-throughput topics.
+Commit the right offsets at the right time
+A common pitfall when committing in the middle of the poll loop is accidentally
+committing the last offset read when polling and not the offset after the last offset
+processed. Remember that it is critical to always commit offsets for messages after
+they were processed—committing offsets for messages read but not processed can
+lead to the consumer missing messages. Chapter 4 has examples that show how to do
+just that.
+Rebalances
+When designing an application, we need to remember that consumer rebalances will
+happen, and we need to handle them properly. Chapter 4 contains a few examples.
+This usually involves committing offsets before partitions are revoked and cleaning
+any state the application maintains when it is assigned new partitions.
+Consumers may need to retry
+In some cases, after calling poll and processing records, some records are not fully
+processed and will need to be processed later. For example, we may try to write
+records from Kafka to a database but find that the database is not available at that
+moment and we need to retry later. Note that unlike traditional pub/sub messaging
+systems, Kafka consumers commit offsets and do not “ack” individual messages. This
+means that if we failed to process record #30 and succeeded in processing record #31,
+we should not commit offset #31—this would result in marking as processed all the
+records up to #31 including #30, which is usually not what we want. Instead, try fol‐
+lowing one of the following two patterns.
+One option when we encounter a retriable error is to commit the last record we pro‐
+cessed successfully. We’ll then store the records that still need to be processed in a
+buffer (so the next poll won’t override them), use the consumer pause() method to
+ensure that additional polls won’t return data, and keep trying to process the records.
+A second option when encountering a retriable error is to write it to a separate topic
+and continue. A separate consumer group can be used to handle retries from the
+retry topic, or one consumer can subscribe to both the main topic and to the retry
+topic but pause the retry topic between retries. This pattern is similar to the dead-
+letter-queue system used in many messaging systems.
+Using Consumers in a Reliable System | 175
+
+=== PAGE 205 ===
+Consumers may need to maintain state
+In some applications, we need to maintain state across multiple calls to poll. For
+example, if we want to calculate moving average, we’ll want to update the average
+after every time we poll Kafka for new messages. If our process is restarted, we will
+need to not just start consuming from the last offset, but we’ll also need to recover the
+matching moving average. One way to do this is to write the latest accumulated value
+to a “results” topic at the same time the application is committing the offset. This
+means that when a thread is starting up, it can pick up the latest accumulated value
+when it starts and pick up right where it left off. In Chapter 8, we discuss how an
+application can write results and commit offsets in a single transaction. In general,
+this is a rather complex problem to solve, and we recommend looking at a library like
+Kafka Streams or Flink, which provides high-level DSL-like APIs for aggregation,
+joins, windows, and other complex analytics.
+Validating System Reliability
+Once we have gone through the process of figuring out our reliability requirements,
+configuring the brokers, configuring the clients, and using the APIs in the best way
+for our use case, we can just relax and run everything in production, confident that
+no event will ever be missed, right?
+We recommend doing some validation first and suggest three layers of validation:
+validate the configuration, validate the application, and monitor the application in
+production. Let’s look at each of these steps and see what we need to validate and
+how.
+Validating Configuration
+It is easy to test the broker and client configuration in isolation from the application
+logic, and it is recommended to do so for two reasons:
+• It helps to test if the configuration we’ve chosen can meet our requirements.
+• It is a good exercise to reason through the expected behavior of the system.
+Kafka includes two important tools to help with this validation. The
+org.apache.kafka.tools package includes VerifiableProducer and Verifiable
+Consumer classes. These can run as command-line tools or be embedded in an auto‐
+mated testing framework.
+The idea is that the verifiable producer produces a sequence of messages containing
+numbers from 1 to a value we choose. We can configure the verifiable producer the
+same way we configure our own producer, setting the right number of acks, retries,
+delivery.timeout.ms, and rate at which the messages will be produced. When we
+176 | Chapter 7: Reliable Data Delivery
+
+=== PAGE 206 ===
+run it, it will print success or error for each message sent to the broker, based on the
+acks received. The verifiable consumer performs the complementary check. It con‐
+sumes events (usually those produced by the verifiable producer) and prints out the
+events it consumed in order. It also prints information regarding commits and
+rebalances.
+It is important to consider which tests we want to run. For example:
+• Leader election: what happens if we kill the leader? How long does it take the
+producer and consumer to start working as usual again?
+• Controller election: how long does it take the system to resume after a restart of
+the controller?
+• Rolling restart: can we restart the brokers one by one without losing any
+messages?
+• Unclean leader election test: what happens when we kill all the replicas for a par‐
+tition one by one (to make sure each goes out of sync) and then start a broker
+that was out of sync? What needs to happen in order to resume operations? Is
+this acceptable?
+Then we pick a scenario, start the verifiable producer, start the verifiable consumer,
+and run through the scenario—for example, kill the leader of the partition we are
+producing data into. If we expected a short pause and then everything to resume nor‐
+mally with no message loss, we need to make sure the number of messages produced
+by the producer and the number of messages consumed by the consumer match.
+The Apache Kafka source repository includes an extensive test suite . Many of the
+tests in the suite are based on the same principle and use the verifiable producer and
+consumer to make sure rolling upgrades work.
+Validating Applications
+Once we are sure the broker and client configuration meet our requirements, it is
+time to test whether the application provides the guarantees we need. This will check
+things like custom error-handling code, offset commits, and rebalance listeners and
+similar places where the application logic interacts with Kafka’s client libraries.
+Naturally, because application logic can vary considerably, there is only so much
+guidance we can provide on how to test it. We recommend integration tests for the
+application as part of any development process, and we recommend running tests
+under a variety of failure conditions:

@@ -1,0 +1,200 @@
+lems, 309
+implementing custom partitioning strategy,
+70
+index mapping offsets to segment files and
+positions in the file, 155
+Kafka cluster with large number of, filtering
+of topics for subscriptions, 85
+managing, 326-334
+changing a partition's replicas, 327-332
+dumping log segments, 332-333
+preferred replica election, 326
+replica verification, 334
+metrics
+per-partition metrics, 365
+under-replicated partitions, 366
+offline partitions count, 360
+Index | 447
+
+=== PAGE 477 ===
+order of message within, 60
+ownership of, 7
+preferred leader replica, 128
+rebalance, consumer groups and, 80-83
+reducing for a topic, 311
+repartitioning in stream processing, 395
+replication of, 8
+size of, 150
+specifying number for new topic, 306
+splitting into segments for file management,
+152
+stream processing step requiring input from
+multiple, 413
+triggering leader election for multiple parti‐
+tions, 129
+unbalanced partitions or leadership, 350
+unclean leader election, 129
+under-replicated, 348
+using default partitioner, 68
+partitionsFor method, 57
+passwords
+clear-text, avoiding, 281
+in SASL/PLAIN, 278
+protection for, 301
+percentiles, 363
+performance
+commit frequency and, 174
+hardware and, 33
+impact of SSL, 270
+implications of tiered storage, 150
+transactions, 200
+physical storage (see storage)
+PID (producer ID), 182
+PLAIN (see SASL/PLAIN)
+PLAINTEXT transport layer, 268
+platform features (Kafka), 11
+platforms for working with Kafka, 427
+plugin.path configuration (Connect workers),
+212
+poll loop (consumers), 86
+exiting, 105
+poll (Duration) method, 87
+thread safety, 87
+preferences (user)
+applying to receipt of messages, 13
+preferred leader election, 128, 326
+preferred leaders, 141
+finding, 142
+preferred replica election, 348
+principal.builder.class parameter, 270
+principals
+KafkaPrincipal representing client identity,
+270
+processing guarantees, 392
+processing time, 387
+processing with external lookup, stream-table
+joins, 396
+processing with local state, 393
+processing.guarantee configuration, 193
+Processor API, 402
+processor threads (network threads), 143
+processors, 410
+produce quotas, 73
+produce requests, 144, 364
+producer ID (PID), 182, 185
+ProducerRecord object, 49, 322
+keys for records, 68
+producers, 6, 47-75
+configuration validation with VerifiablePro‐
+ducer, 176
+configuring, 54-61
+message delivery time, 56-58
+configuring to be reliable, 169-172
+additional error handling, 171
+retries, 171
+send acknowledgments, 170
+console producer, 320-322
+constructing, 50-51
+manadtory properties, 50
+methods of sending messages, 51
+deciding when to use Kafka Connect instead
+of, 210
+defined, 6
+idempotent, 182-186
+how they work, 182-184
+how to use, 185
+improvements in version 2.5, 186
+limitations of, 184
+interceptors, 71
+metrics, 370-373
+overall producer metrics, 371
+per-broker and per-topic, 372
+monitoring for MirrorMaker in production,
+256
+multiple, Kafka handling of, 10
+overview, 48-50
+quotas and throttling for messages sent by,
+73-75
+448 | Index
+
+=== PAGE 478 ===
+record headers, 71
+sending a message to Kafka, 52-54
+asynchronous send, 53
+serializers, 61-68
+custom, 62
+serializing using Avro, 64
+time-sensitivity requirements between con‐
+sumers and, Kafka decopuling, 204
+transactional, 189, 195
+tuning configuration in MirrorMaker, 258
+production deployment systems, 253
+production environment
+configuration, 42-46
+colocating applications on ZooKeeper,
+44
+datacenter layout, 43
+garbage collector options, 42
+Properties object, 84
+Protobuf, 62
+ProtobufConverter, 212
+publish/subscribe messaging, 1
+beginning of, 2
+individual queue systems, 3
+publish/subscribe pattern
+transactions and, 193
+publishers, 6
+(see also producers)
+purgatory buffer, 145
+Q
+quotas, 265, 376
+produce, consume, and request, 73
+throttling replication using, 129
+R
+rack awareness
+--disable-rack-aware argument, 307, 330
+disabling for replica assignment, 307
+partitions and replicas assigned to brokers
+on different racks, 151
+rack-level misfortune, guarding against, 166
+RackAwareReplicaSelector, 93, 140
+Raft-based controller (KRaft), 137
+RAID (redundant array of independent disks),
+34
+RangeAssignor, 91
+Rao, Jun, 15
+rate metrics, 357
+RateUnit, 357
+readers, 7
+(see also consumers)
+reading data from Kafka, 77
+(see also consumers)
+read_committed isolation level, 190
+read_uncommitted isolation level, 190
+reauthentication, 286-287
+rebalance listeners, 101-103
+rebalanceListener.onPartitionAssignment
+method, 87
+rebalances (partition), 81
+consumer rebalances, 175
+cooperative, 81
+eager, 81
+onsumer reliability and, 174
+triggering, 94
+receive.buffer.bytes parameter, 61, 93, 257
+record-error-rate metric, 182, 371
+record-retry-rate metric, 371
+RecordMetadata object, 49, 53
+records
+committing records and offsets in a transac‐
+tion, 191, 192
+deleting from a topic, 128
+headers, 71
+records-lag-max metric, 374, 378
+recovery point objective (RPO), 241
+recovery time objective (RTO), 241
+redundant array of independent disks (RAID),
+34
+regional and central clusters
+in hub-and-spoke architecture, 237
+use of cross-cluster data mirroring, 234

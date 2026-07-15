@@ -1,0 +1,200 @@
+All connections where the message flows, as well as all disks where messages are
+stored, should be encrypted or physically secured to prevent eavesdroppers from
+reading the data and to ensure that data cannot be stolen.
+Data integrity
+Message digests should be included for data transmitted over insecure networks
+to detect tampering.
+Access control
+Before writing the message to the log, the leader broker should verify that Alice is
+authorized to write to customerOrders. Before returning messages to Bob’s con‐
+sumer, the broker should verify that Bob is authorized to read from the topic. If
+Bob’s consumer uses group management, the broker should also verify that Bob
+has access to the consumer group.
+Auditability
+An audit trail that shows all operations that were performed by brokers, Alice,
+Bob, and other clients should be logged.
+Availability
+Brokers should apply quotas and limits to avoid some users hogging all the avail‐
+able bandwidth or overwhelming the broker with denial-of-service attacks. Zoo‐
+Keeper should be locked down to ensure availability of the Kafka cluster since
+broker availability is dependent on ZooKeeper availability and the integrity of
+metadata stored in ZooKeeper.
+In the following sections, we explore the Kafka security features that can be used to
+provide these guarantees. We first introduce the Kafka connection model and the
+security protocols associated with connections from clients to Kafka brokers. We then
+look at each security protocol in detail and examine the authentication capabilities of
+each protocol to ascertain client authenticity and server authenticity. We review
+options for encryption at different stages, including built-in encryption of data in
+transit in some security protocols to address data privacy and data integrity. Then, we
+explore customizable authorization in Kafka to manage access control and the main
+logs that contribute to auditability. Finally, we review security for the rest of the
+Locking Down Kafka | 267
+
+=== PAGE 297 ===
+system, including ZooKeeper and the platform, which is necessary to maintain availa‐
+bility. For details on quotas that contribute to service availability through fair alloca‐
+tion of resources among users, refer to Chapter 3.
+Security Protocols
+Kafka brokers are configured with listeners on one or more endpoints and accept cli‐
+ent connections on these listeners. Each listener can be configured with its own secu‐
+rity settings. Security requirements on a private internal listener that is physically
+protected and only accessible to authorized personnel may be different from the secu‐
+rity requirements of an external listener accessible over the public internet. The
+choice of security protocol determines the level of authentication and encryption of
+data in transit.
+Kafka supports four security protocols using two standard technologies, TLS and
+SASL. Transport Layer Security (TLS), commonly referred to by the name of its pre‐
+decessor, Secure Sockets Layer (SSL), supports encryption as well as client and server
+authentication. Simple Authentication and Security Layer (SASL) is a framework for
+providing authentication using different mechanisms in connection-oriented proto‐
+cols. Each Kafka security protocol combines a transport layer (PLAINTEXT or SSL)
+with an optional authentication layer (SSL or SASL):
+PLAINTEXT
+PLAINTEXT transport layer with no authentication. Is suitable only for use
+within private networks for processing data that is not sensitive since no authen‐
+tication or encryption is used.
+SSL
+SSL transport layer with optional SSL client authentication. Is suitable for use in
+insecure networks since client and server authentication as well as encryption are
+supported.
+SASL_PLAINTEXT
+PLAINTEXT transport layer with SASL client authentication. Some SASL mech‐
+anisms also support server authentication. Does not support encryption and
+hence is suitable only for use within private networks.
+SASL_SSL
+SSL transport layer with SASL authentication. Is suitable for use in insecure net‐
+works since client and server authentication as well as encryption are supported.
+268 | Chapter 11: Securing Kafka
+
+=== PAGE 298 ===
+TLS/SSL
+TLS is one of the most widely used cryptographic protocols on the
+public internet. Application protocols like HTTP , SMTP , and FTP
+rely on TLS to provide privacy and integrity of data in transit. TLS
+relies on a Public Key Infrastructure (PKI) to create, manage, and
+distribute digital certificates that can be used for asymmetric
+encryption, avoiding the need for distributing shared secrets
+between servers and clients. Session keys generated during the TLS
+handshake enable symmetric encryption with higher performance
+for subsequent data transfer.
+The listener used for inter-broker communication can be selected by configuring
+inter.broker.listener.name or security.inter.broker.protocol. Both server-
+side and client-side configuration options must be provided in the broker configura‐
+tion for the security protocol used for inter-broker communication. This is because
+brokers need to establish client connections for that listener. The following example
+configures SSL for the inter-broker and internal listeners, and SASL_SSL for the
+external listener:
+listeners=EXTERNAL://:9092,INTERNAL://10.0.0.2:9093,BROKER://10.0.0.2:9094
+advertised.listeners=EXTERNAL://broker1.example.com:9092,INTERNAL://
+broker1.local:9093,BROKER://broker1.local:9094
+listener.security.protocol.map=EXTERNAL:SASL_SSL,INTERNAL:SSL,BROKER:SSL
+inter.broker.listener.name=BROKER
+Clients are configured with a security protocol and bootstrap servers that determine
+the broker listener. Metadata returned to clients contains only the endpoints corre‐
+sponding to the same listener as the bootstrap servers:
+security.protocol=SASL_SSL
+bootstrap.servers=broker1.example.com:9092,broker2.example.com:9092
+In the next section on authentication, we review the protocol-specific configuration
+options for brokers and clients for each security protocol.
+Authentication
+Authentication is the process of establishing the identity of the client and server to
+verify client authenticity and server authenticity. When Alice’s client connects to the
+leader broker to produce a customer order record, server authentication enables the
+client to establish that the server that the client is talking to is the actual broker. Client
+authentication verifies Alice’s identity by validating Alice’s credentials, like a password
+or digital certificate, to determine that the connection is from Alice and not an
+impersonator. Once authenticated, Alice’s identity is associated with the connection
+throughout the lifetime of the connection. Kafka uses an instance of KafkaPrincipal
+to represent client identity and uses this principal to grant access to resources and
+Authentication | 269
+
+=== PAGE 299 ===
+allocate quotas for connections with that client identity. The KafkaPrincipal for each
+connection is established during authentication based on the authentication protocol.
+For example, the principal User:Alice may be used for Alice based on the username
+provided for password-based authentication. KafkaPrincipal may be customized by
+configuring principal.builder.class for brokers.
+Anonymous Connections
+The principal User:ANONYMOUS is used for unauthenticated connec‐
+tions. This includes clients on PLAINTEXT listeners as well as
+unauthenticated clients on SSL listeners.
+SSL
+When Kafka is configured with SSL or SASL_SSL as the security protocol for a lis‐
+tener, TLS is used as the secure transport layer for connections on that listener. When
+a connection is established over TLS, the TLS handshake process performs authenti‐
+cation, negotiates cryptographic parameters, and generates shared keys for encryp‐
+tion. The server’s digital certificate is verified by the client to establish the identity of
+the server. If client authentication using SSL is enabled, the server also verifies the cli‐
+ent’s digital certificate to establish the identity of the client. All traffic over SSL is
+encrypted, making it suitable for use in insecure networks.
+SSL Performance
+SSL channels are encrypted and hence introduce a noticeable over‐
+head in terms of CPU usage. Zero-copy transfer is currently not
+supported for SSL. Depending on the traffic pattern, the overhead
+may be up to 20–30%.
+Configuring TLS
+When TLS is enabled for a broker listener using SSL or SASL_SSL, brokers should be
+configured with a key store containing the broker’s private key and certificate, and
+clients should be configured with a trust store containing the broker certificate or the
+certificate of the certificate authority (CA) that signed the broker certificate.  Broker
+certificates should contain the broker hostname as a Subject Alternative Name (SAN)
+extension or as the Common Name (CN) to enable clients to verify the server host‐
+name. Wildcard certificates can be used to simplify administration by using the same
+key store for all brokers in a domain.
+270 | Chapter 11: Securing Kafka
+
+=== PAGE 300 ===
+Server Hostname verification
+By default, Kafka clients verify that the hostname of the server
+stored in the server certificate matches the host that the client is
+connecting to. The connection hostname may be a bootstrap server
+that the client is configured with or an advertised listener hostname
+that was returned by a broker in a metadata response. Hostname
+verification is a critical part of server authentication that protects
+against man-in-the-middle attacks and hence should not be dis‐
+abled in production systems.
+Brokers can be configured to authenticate clients connecting over listeners using
+SSL as the security protocol by setting the broker configuration option ssl.
+client.auth=required. Clients should be configured with a key store, and brokers
+should be configured with a trust store containing client certificates or the certificate
+of the CAs that signed the client certificates. If SSL is used for inter-broker communi‐
+cation, broker trust stores should include the CA of the broker certificates as well as
+the CA of the client certificates. By default, the distinguished name (DN) of the client
+certificate is used as the KafkaPrincipal for authorization and quotas.  The configu‐
+ration option ssl.principal.mapping.rules can be used to provide a list of rules to
+customize the principal. Listeners using SASL_SSL disable TLS client authentication
+and rely on SASL authentication and the KafkaPrincipal established by SASL.
+SSL Client Authentication
+SSL client authentication may be made optional by setting ssl.
+client.auth=requested. Clients that are not configured with key
+stores will complete the TLS handshake in this case, but will be
+assigned the principal User:ANONYMOUS.
+The following examples show how to create key stores and trust stores for server and
+client authentication using a self-signed CA.
+Generate self-signed CA key-pair for brokers:
+$ keytool -genkeypair -keyalg RSA -keysize 2048 -keystore server.ca.p12        \
+  -storetype PKCS12 -storepass server-ca-password -keypass server-ca-password  \
+  -alias ca -dname "CN=BrokerCA" -ext bc=ca:true -validity 365     
+$ keytool -export -file server.ca.crt -keystore server.ca.p12 \
+  -storetype PKCS12 -storepass server-ca-password -alias ca -rfc   
+Create a key-pair for the CA and store it in a PKCS12 file server.ca.p12. We use
+this for signing certificates.
+Export the CA ’s public certificate to server.ca.crt. This will be included in trust
+stores and certificate chains.
+Authentication | 271
+
+=== PAGE 301 ===
+Create key stores for brokers with a certificate signed by the self-signed CA. If using
+wildcard hostnames, the same key store can be used for all brokers. Otherwise, create
+a key store for each broker with its fully qualified domain name (FQDN):
+$ keytool -genkey -keyalg RSA -keysize 2048 -keystore server.ks.p12         \
+  -storepass server-ks-password -keypass server-ks-password -alias server   \
+  -storetype PKCS12 -dname "CN=Kafka,O=Confluent,C=GB" -validity 365      
+$ keytool -certreq -file server.csr -keystore server.ks.p12 -storetype PKCS12 \
+  -storepass server-ks-password -keypass server-ks-password -alias server 
+$ keytool -gencert -infile server.csr -outfile server.crt                   \
+  -keystore server.ca.p12 -storetype PKCS12 -storepass server-ca-password   \
+  -alias ca -ext SAN=DNS:broker1.example.com -validity 365                
+$ cat server.crt server.ca.crt > serverchain.crt
+$ keytool -importcert -file serverchain.crt -keystore server.ks.p12         \
+  -storepass server-ks-password -keypass server-ks-password -alias server   \

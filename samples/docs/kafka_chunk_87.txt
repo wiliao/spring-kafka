@@ -1,0 +1,200 @@
+improvements in version 2.5, 186
+limitations of, 184
+--if-not-exists argument (kafka-topics.sh), 307
+in-sync replicas, 141, 163
+clients' consumption of messages from, 146
+keeping replicas in sync, 168
+min.insync.replicas broker configuration,
+168
+incremental rebalances, 81
+(see also cooperative rebalances)
+indexes, 155
+validating index file for log segment, 333
+ingest frameworks for other datastores, 229
+ingestion time, 386
+initTransaction method, 198
+inodes, 368
+installation, 19-46
+configuring Kafka clusters, 36
+environment setup, 19-23
+Index | 441
+
+=== PAGE 471 ===
+Kafka broker, 23-24
+Kafka in the cloud, 35
+production concerns, 42-46
+selecting hardware, 33-35
+integrated platforms for working with Kafka,
+427
+intelligent platform management interface
+(IPMI), 353
+inter.broker.listener.name parameter, 269
+interactive queries, 401
+interceptors (producer), 71
+Internet of Things, use of stream processing,
+417
+interval.ms configuration (see auto.com‐
+mit.interval.ms)
+IntSerializer, 107
+INV ALID_CONFIG exception, 171
+IPMI (intelligent platform management inter‐
+face), 353
+isolation.level configuration, 190
+J
+JAAS configuration file, 275, 276, 278
+logins and options for ZooKeeper server,
+299
+Java
+client libraries allowing interaction with
+topics, 320
+clients including JMX metrics for monitor‐
+ing, 178
+conversion of Kafka byte arrays to Java
+objects, 106
+garbage collection options, 42
+installing, 19
+running Kafka natively on Java environment
+for Windows, 422
+TLS features, use to revoke certificates, 274
+Java Authentication and Authorization Service
+(JAAS), 275
+Java Management Extensions (see JMX inter‐
+face)
+Java Virtual Machine (see JVM)
+JDBC
+cloning connector source, 216
+configuring JDBC source connector, 218
+creating and configuring JDBC connector,
+219
+driver for MySQL, installing, 217
+JDBC connector using JDBC and SQL to
+scan for new records, 220
+JDK (Java Development Kit), 20
+JMX interface, 339
+finding the JMX port, 340
+using JMX agent running directly on Kafka
+process to access metrics, 340
+joins and/or aggregation in stream processing,
+187
+JscoSchemaConverter, 212
+JSON
+serializer and deserializer, generated with
+Gson, 405
+support by Kafka, 211
+JSON Web Tokens (JWTs), 283
+JSONConverter, 212
+JVM (Java Virtual Machine)
+heap memory for, 34
+monitoring, 366-367
+garbage collection, 366
+Java OS monitoring, 367
+K
+Kafka, 4-9
+benefits of, 10-12
+disk-based retention, 11
+handling multiple producers and con‐
+sumers, 10
+high performance, 11
+platform features, 11
+scalability, 11
+brokers and clusters, 8
+contributing to, 115
+multiple clusters, 9
+origins of, 14-17
+producers and consumers, 6
+topics and partitions, 5
+value provided to data pipelines, 203
+and ZooKeeper, 20
+Kafka Connect, 11, 203, 211-229
+agnostic to data formats, 206
+alternatives to, 229-230
+connector example, file source and file sink,
+214-216
+connector example, MySQL to Elastic‐
+search, 216-222
+deeper look at, 225-229
+connectors and tasks, 226
+442 | Index
+
+=== PAGE 472 ===
+converters and Connect's data model,
+227
+offset managment, 228
+worker processes, 227
+error handling and dead letter queues, 225
+MirrorMaker based on, deployment modes,
+253
+producer and consumer metrics, 256
+versus producer and consumer, when to use,
+210
+running, 211-214
+configurations for Connect workers, 211
+standalone mode, 214
+single message transformations (SMTs),
+207, 223
+use of topic to store configuration, 118
+Kafka Console consumer, 215
+Kafka internals, 135-159
+cluster membership, 135
+controller, 136-139
+physical storage, 149-159
+compaction, 156-158
+deleted events, 158
+file format, 153
+file management, 152
+indexes, 155
+partition allocation, 151
+tiered storage, 149
+timing of topic compaction, 159
+replication, 139-142
+request processing, 142-149
+Kafka Streams, 176, 381
+APIs for manipulating timestamps of
+records, 387
+architecture overview, 410-416
+building a topology, 410
+optimizing a topology, 411
+scaling a topology, 412
+surviving failures, 415
+testing a topology, 411
+assignment of time to each event, 387
+enabling exactly-once semtics using transac‐
+tions, 193
+examples, 402-410
+clickstream enrichment, 408-410
+stock market statistics, 405-408
+word count, 402-405
+support for event time independent of the
+processing time, 400
+Kafka tools, additional, 427-432
+client libraries, 431
+cluster deployment and management, 429
+comprehensive platforms, 427
+monitoring and data exploration, 430
+stream processing, 431
+Kafka, Franz, 17
+kafka-acls.sh tool, 335
+kafka-assigner tool, 351
+kafka-broker-api-versions.sh tool, 335
+kafka-config-topic, 215
+kafka-config.sh tool, 306
+kafka-configs.sh tool, 315-320
+--add-config retention.ms, 316
+--add-config-file argument, 315
+--alter --entity-type topics --entity-name,
+316
+--alter command and --delete-config
+parameter, 319
+--describe command, 319
+command to change controller mutation for
+user and client, 318
+overriding broker configuration defaults,
+318
+kafka-console-consumer.sh tool, 320, 322
+--bootstrap-server, --topic, and --whitelist
+parameters, 323
+--formatter kafka.tools.ChecksumMessage‐
+Formatter, 324
+using consumer configuration options, 323
+kafka-console-producer.sh tool, 73, 320
+command line arguments to use with --
