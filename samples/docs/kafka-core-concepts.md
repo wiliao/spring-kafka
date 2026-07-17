@@ -146,7 +146,7 @@ Kafka provides **durable storage** of messages for configurable periods:
 
 ### 3.3 KRaft (Kafka's New Raft-Based Controller)
 
-- Starting in Apache Kafka 2.8, KRaft replaces the ZooKeeper-based controller
+- KRaft is a **preview** in Apache Kafka 2.8; the first **production** version ships in Kafka 3.0 — clusters can run with either the ZooKeeper-based controller or KRaft
 - Controller nodes form a **Raft quorum** managing a log of metadata events
 - Eliminates ZooKeeper dependency — Kafka runs as a single executable
 - Addresses scalability bottlenecks and metadata consistency issues
@@ -193,7 +193,7 @@ Kafka provides **at-least-once** delivery by default and supports **exactly-once
 
 ### 4.2 Broker Configuration for Reliability
 
-- **Replication factor** (default: 1, recommended: 3): Number of copies of each partition
+- **Replication factor** (recommended: 3): Number of copies of each partition
 - **unclean.leader.election.enable** (default: false): Whether to allow out-of-sync replicas to become leaders (risks data loss)
 - **min.insync.replicas** (recommended: 2): Minimum number of ISR replicas for a successful write
 
@@ -247,6 +247,7 @@ Kafka Connect is a framework for **streaming data between Kafka and other system
 - **Hub-and-Spoke**: Multiple local clusters feed into a central aggregate cluster
 - **Active-Active**: Data is replicated bidirectionally between clusters
 - **Active-Standby**: One cluster is primary, another is for disaster recovery
+- **Stretch Clusters**: A single cluster spanning multiple datacenters
 
 ### 7.2 MirrorMaker 2.0
 
@@ -298,7 +299,7 @@ Stream processing operates on data in **real time** as messages are produced, as
 - **Time**: Event time, processing time, ingestion time
 - **State**: Local state stores for stateful operations (joins, aggregations, windowing)
 - **Stream-Table Duality**: Streams and tables are dual — a stream can be viewed as a table (latest value per key), and a table can be viewed as a stream (changelog)
-- **Time Windows**: Tumbling, hopping, sliding, and session windows for time-based aggregations
+- **Time Windows**: Tumbling, hopping, and session windows for time-based aggregations
 
 ### 9.3 Processing Guarantees
 
