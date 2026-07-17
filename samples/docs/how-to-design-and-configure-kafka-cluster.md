@@ -290,21 +290,3 @@ The following corrections were applied after a technical review to improve accur
 | 7 | Clarified `ActiveControllerCount` behavior in KRaft: reports 1 only on the current leader; other controllers report 0 | §8.1 |
 | 8 | Added Tiered Storage callout block with KIP-405 link (offloads older segments to S3/GCS, requires single-mount layout) | §3.3 |
 | 9 | Added Java 21 support note (Kafka 3.7+), AWS MSK guidance hyperlink, and nuance on partition reassignment batch sizes | §4.2, §2.2, §8.2 |
-
----
-
-## Appendix A: Review Fix Summary
-
-The following corrections were applied after a review pass to improve accuracy and recency:
-
-| # | Fix | Section |
-|---|-----|--------|
-| 1 | Changed `broker.id=1` → `node.id=1`; updated comment to clarify KRaft uses `node.id`, `broker.id` is for legacy ZK mode | §5.1 |
-| 2 | Added missing `listener.security.protocol.map=BROKER:PLAINTEXT,CONTROLLER:PLAINTEXT` so the KRaft config block is self-contained | §5.4 |
-| 3 | Added deprecation note: `controller.quorum.voters` is deprecated since Kafka 3.4+; use `controller.quorum.bootstrap.servers` instead | §5.4 |
-| 4 | Added warning that partition count can only be **increased**, never decreased (without recreating the topic) | §5.2 |
-| 5 | Updated idempotence note: since Kafka 3.0+ the client enforces `max.in.flight.requests.per.connection<=5` automatically — no manual tuning needed | §6 |
-| 6 | Corrected KRaft timeline: was a preview in 2.8, **early-access in 3.0–3.2**, production-ready in **3.3** (not 3.0) | §2.1 |
-| 7 | Clarified `ActiveControllerCount` behavior in KRaft: reports 1 only on the current leader; other controllers report 0 | §8.1 |
-| 8 | Added Tiered Storage callout block with KIP-405 link (offloads older segments to S3/GCS, requires single-mount layout) | §3.3 |
-| 9 | Added Java 21 support note (Kafka 3.7+), AWS MSK guidance hyperlink, and nuance on partition reassignment batch sizes | §4.2, §2.2, §8.2 |
