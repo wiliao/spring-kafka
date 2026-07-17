@@ -738,9 +738,11 @@ Replication keeps multiple copies of each partition on different brokers, so dat
 
 ### Use Cases of Cross-Cluster Mirroring
 
-- Regional data aggregation
-- Disaster recovery
-- Cloud migration
+- Regional and central clusters
+- High availability (HA) and disaster recovery (DR)
+- Regulatory compliance
+- Cloud migrations
+- Aggregation of data from edge clusters
 
 ### Multicluster Architectures
 
@@ -760,7 +762,7 @@ Replication keeps multiple copies of each partition on different brokers, so dat
 
 ### Other Cross-Cluster Mirroring Solutions
 
-- **Uber uReplicator** — Built on top of MirrorMaker
+- **Uber uReplicator** — Uber's MirrorMaker clone using Apache Helix as a central controller to manage topics and partition assignment, avoiding consumer rebalances
 - **LinkedIn Brooklin** — General-purpose data replication
 - **Confluent Cross-Datacenter Mirroring Solutions** — Enterprise replication features
 
@@ -947,7 +949,7 @@ Stream processing continuously processes data in real time, as opposed to batch 
 - **Time** — Event time vs. processing time
 - **State** — Local state stores for aggregation
 - **Stream-Table Duality** — Streams can be viewed as tables and vice versa
-- **Time Windows** — Tumbling, hopping, sliding, and session windows
+- **Time Windows** — Hopping, tumbling, and session windows, plus grace periods and alignment
 - **Processing Guarantees** — Exactly-once, at-least-once
 
 ### Stream Processing Design Patterns
