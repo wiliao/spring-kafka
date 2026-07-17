@@ -24,8 +24,8 @@ Example: 1 TB/day × 7 days retention = **7 TB minimum** across the cluster — 
 
 ### 2.1 KRaft vs. ZooKeeper
 
-- **The book (Kafka 2.7/2.8 era)**: ZooKeeper stores broker metadata; run an ensemble of an **odd number of servers (3, 5, or 7)**. KRaft was a preview in 2.8, production-ready in 3.0.
-- **Today**: **KRaft is the only mode — ZooKeeper support was completely removed in Apache Kafka 4.0.** New clusters should always use KRaft.
+- **The book (Kafka 2.7/2.8 era)**: ZooKeeper stores broker metadata; run an ensemble of an **odd number of servers (3, 5, or 7)**. KRaft was a preview in 2.8, early-access in 3.0–3.2.
+- **Today**: **KRaft is the only mode — ZooKeeper support was completely removed in Apache Kafka 4.0.** New clusters should always use KRaft. KRaft became production-ready in **3.3** (not 3.0 — earlier versions were early-access only).
 
 **KRaft controller deployment:**
 - Use **3 controllers** for production (tolerates 1 failure); 5 for very large clusters. Never an even number.
@@ -40,7 +40,7 @@ Determined by (per the book):
 3. **CPU capacity** — compression and request handling
 4. **Network capacity** — replication multiplies ingress traffic (RF=3 roughly doubles write traffic)
 
-Keep broker CPU utilization (user + system) **under 60%** so the cluster retains headroom for rolling upgrades, patching, and broker failures (AWS MSK guidance).
+Keep broker CPU utilization (user + system) **under 60%** so the cluster retains headroom for rolling upgrades, patching, and broker failures ([AWS MSK guidance](https://docs.aws.amazon.com/msk/latest/developerguide/bestpractices.html)).
 
 ### 2.3 Single Cluster vs. Multiple Clusters
 
@@ -93,6 +93,8 @@ Mirror data with **MirrorMaker 2** (built on Kafka Connect; supports offset tran
 - **RAID 10** simplifies failure handling (a disk loss doesn't take a log dir offline) but costs capacity and some throughput.
 - **Caveat**: Tiered Storage requires a single mount point and does not support JBOD (Confluent Platform note).
 
+> **Tiered Storage** (Kafka 3.6+, Confluent Platform): offloads older log segments to cheap remote storage (S3, GCS, etc.), decoupling retention from local disk capacity. If you plan to use it, factor a single-mount layout into your disk design. See [KIP-405](https://cwiki.apache.org/confluence/display/KAFKA/KIP-405%3A+Kafka+Tiered+Storage) for details.
+
 ---
 
 ## 4. OS and JVM Tuning
@@ -108,7 +110,7 @@ Mirror data with **MirrorMaker 2** (built on Kafka Connect; supports offset tran
 
 - **Heap**: keep modest — **5–6 GB** is typical; Kafka's performance comes from page cache, not heap. Alarm if heap-used-after-GC exceeds **60%**.
 - **GC**: G1GC with `MaxGCPauseMillis=20` and `InitiatingHeapOccupancyPercent=35` (book recommendation, still the standard starting point).
-- **Java version**: the book covers Java 8/11; current Kafka releases run on Java 17+ (check your Kafka version's support matrix).
+- **Java version**: the book covers Java 8/11; current Kafka releases run on Java 17+ (Kafka 3.7+ supports Java 21). Check your Kafka version's support matrix.
 
 ---
 
@@ -117,8 +119,8 @@ Mirror data with **MirrorMaker 2** (built on Kafka Connect; supports offset tran
 ### 5.1 General Parameters
 
 ```properties
-# Identity — unique integer per broker (KRaft: node.id)
-broker.id=1
+# Identity — unique integer per broker (KRaft uses node.id; broker.id is for legacy ZK mode)
+node.id=1
 
 # Client endpoint
 listeners=PLAINTEXT://0.0.0.0:9092
@@ -141,6 +143,7 @@ broker.rack=us-east-1a
 
 ```properties
 num.partitions=8                    # default for new topics (book default: 1 — raise deliberately)
+                                    # ⚠ Partition count can only be increased, never decreased (without recreating the topic)
 default.replication.factor=3
 log.retention.hours=168             # 1 week (book default)
 log.retention.bytes=-1              # or cap per-partition size
@@ -168,7 +171,9 @@ Increase `num.io.threads` **before** `num.network.threads` to avoid queue conges
 process.roles=broker                # or controller, or broker,controller (combined)
 node.id=1
 controller.quorum.voters=1@ctrl1:9093,2@ctrl2:9093,3@ctrl3:9093
+# Note: controller.quorum.voters is deprecated since Kafka 3.4+; use controller.quorum.bootstrap.servers instead
 controller.listener.names=CONTROLLER
+listener.security.protocol.map=BROKER:PLAINTEXT,CONTROLLER:PLAINTEXT
 listeners=BROKER://0.0.0.0:9092
 ```
 
@@ -186,7 +191,7 @@ The durability baseline — apply at broker/topic level **and** client level:
 | `min.insync.replicas` | **RF − 1** (=2) | Writes succeed with one replica offline; minISR = RF would block writes during maintenance |
 | `unclean.leader.election.enable` | **false** (default) | Prevents out-of-sync replicas becoming leader (data loss) |
 | Producer `acks` | **all** | Wait for all in-sync replicas |
-| Producer `enable.idempotence` | **true** | No duplicates from retries (requires `acks=all`, `retries>0`, `max.in.flight.requests.per.connection<=5`) |
+| Producer `enable.idempotence` | **true** | No duplicates from retries (requires `acks=all`, `retries>0`; since Kafka 3.0+ the client enforces `max.in.flight.requests.per.connection<=5` automatically) |
 | Consumer `enable.auto.commit` | **false** | Commit offsets only after messages are fully processed |
 
 Also: rely on **replication, not fsync**, for durability — Kafka flushes via the OS page cache; tune `flush.*` settings with care.
@@ -210,7 +215,7 @@ Also: rely on **replication, not fsync**, for durability — Kafka flushes via t
 | Metric | Threshold / Action |
 |--------|--------------------|
 | **Under-replicated partitions** | > 0 = investigate immediately |
-| **Active controller count** | Must be exactly 1 per cluster |
+| **Active controller count** | Must be exactly 1 per cluster (in KRaft, `ActiveControllerCount` reports 1 only on the current leader; other controllers report 0) |
 | **Offline partitions** | > 0 = data unavailable |
 | Broker CPU (user + system) | Keep **< 60%**; scale up/out above that |
 | Disk usage (`KafkaDataLogsDiskUsed` or equivalent) | Alarm at **85%** — expand storage, shorten retention, or delete unused topics |
@@ -222,7 +227,7 @@ Define **SLIs/SLOs** (e.g., produce latency, availability) and alert on burn rat
 
 ### 8.2 Operational Practices
 
-- **Rebalancing**: use **Cruise Control** for continuous load distribution; reassign partitions in small batches (≤ ~10 partitions per `kafka-reassign-partitions` call) and avoid reassignment when CPU > 70% (replication adds load).
+- **Rebalancing**: use **Cruise Control** for continuous load distribution; reassign partitions in small batches (≤ ~10 partitions per `kafka-reassign-partitions` call as a conservative starting point — larger batches are feasible with monitoring) and avoid reassignment when CPU > 70% (replication adds load).
 - **Retention management**: topic-level `retention.ms` / `retention.bytes` override cluster defaults — use them to free disk selectively.
 - **Scaling**: prefer scaling **up** (bigger brokers) for CPU headroom, or **out** (more brokers + new partitions) for granular growth; verify new partitions land on new brokers with `kafka-topics.sh --describe`.
 - **Rolling changes**: one broker at a time; with RF=3 and minISR=2 the cluster stays fully available.
